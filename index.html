@@ -80,7 +80,7 @@ async function wm(dataUrl, pin, tag, projectName, elevName){
       const line2=fmtDateLong(now.toISOString());
       const line3=USER;
 
-      const fs=Math.max(22,Math.min(img.width*0.045,52));
+      const fs=Math.round(img.height*0.038);
       
       const pad=fs,lh=fs*1.7;
 
