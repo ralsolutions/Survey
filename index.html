@@ -69,44 +69,72 @@ const SL={survey:'Survey',progress:'Progress',finish:'Finish',complete:'Complete
 async function wm(dataUrl, pin, tag, projectName, elevName){
   return new Promise(resolve=>{
     const img=new Image();
+
     img.onload=()=>{
       const c=document.createElement('canvas');
-      c.width=img.width;c.height=img.height;
       const ctx=c.getContext('2d');
-      ctx.drawImage(img,0,0);
+
+      const MAX_WIDTH = 1920;
+      let w = img.width;
+      let h = img.height;
+
+      if (w > MAX_WIDTH) {
+        const ratio = MAX_WIDTH / w;
+        w = MAX_WIDTH;
+        h = h * ratio;
+      }
+
+      c.width = w;
+      c.height = h;
+
+      ctx.drawImage(img, 0, 0, w, h);
 
       const now=new Date();
-      const line1='#'+pin.id+'  '+(pin.repairName||'Repair')+'  '+getMeas(pin)+'  '+tag;
-      const line2=fmtDateLong(now.toISOString());
-      const line3=USER;
 
-      const fs=Math.round(img.height*0.038);
-      
-      const pad=fs,lh=fs*1.7;
+      const line1 = [
+        '#'+pin.id,
+        trimRepairName(pin.repairName),
+        formatMeasure(pin),
+        formatPhase(tag)
+      ].join('  ');
 
-      ctx.font='700 '+fs+'px Arial,sans-serif';
-      const bw=Math.max(ctx.measureText(line1).width,ctx.measureText(line2).width,ctx.measureText(line3).width)+pad*2.2;
-      const bh=lh*3+pad*2;
-      const bx=pad;
-      const by=img.height-bh-pad;
+      const line2 = fmtDateLong(now.toISOString());
+      const line3 = USER;
 
-      // solid dark background
-      ctx.globalAlpha=0.72;
+      const base = Math.min(w, h);
+      const fs = Math.max(18, Math.min(42, base * 0.035));
+      const pad = fs * 0.8;
+      const lh = fs * 1.4;
+      const margin = base * 0.03;
+
+      ctx.font='700 '+fs+'px Arial, sans-serif';
+      ctx.textBaseline='top';
+
+      const bw=Math.max(
+        ctx.measureText(line1).width,
+        ctx.measureText(line2).width,
+        ctx.measureText(line3).width
+      ) + pad*2;
+
+      const bh=lh*3 + pad*2;
+
+      const bx = margin;
+      const by = h - bh - margin;
+
+      ctx.globalAlpha=0.75;
       ctx.fillStyle='#0a0a0a';
-      ctx.beginPath();
-      ctx.roundRect(bx,by,bw,bh,8);
-      ctx.fill();
+      ctx.fillRect(bx,by,bw,bh);
       ctx.globalAlpha=1;
 
-      // all lines bold Arial
-      ctx.font='700 '+fs+'px Arial,sans-serif';
-      ctx.fillStyle='#ffffff';
-      ctx.fillText(line1,bx+pad,by+pad+fs);
-      ctx.fillText(line2,bx+pad,by+pad+lh+fs);
-      ctx.fillText(line3,bx+pad,by+pad+lh*2+fs);
+      ctx.fillStyle='#fff';
 
-      resolve(c.toDataURL('image/jpeg',0.88));
+      ctx.fillText(line1,bx+pad,by+pad);
+      ctx.fillText(line2,bx+pad,by+pad+lh);
+      ctx.fillText(line3,bx+pad,by+pad+lh*2);
+
+      resolve(c.toDataURL('image/jpeg',0.85));
     };
+
     img.onerror=()=>resolve(dataUrl);
     img.src=dataUrl;
   });
