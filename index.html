@@ -766,34 +766,78 @@ function TrashPanel({project,onRestore,onClose}){
 // ── COMMENT CELL — expandable notes per stage ─────────────────────────────────
 function CommentCell({pin}){
   const [open,setOpen]=useState(false);
+  const [pos,setPos]=useState({top:0,left:0});
+  const triggerRef=useRef(null);
+
   const stages=[
-    {key:'comment',     label:'To Repair', color:'#3b82f6', bg:'#3b82f610', val:pin.comment},
-    {key:'fixingComment',label:'Fixing',   color:'#8b5cf6', bg:'#8b5cf610', val:pin.fixingComment},
-    {key:'doneComment', label:'Done',      color:'#22c55e', bg:'#22c55e10', val:pin.doneComment},
-    {key:'hazard',      label:'Hazard',    color:HC[pin.hazard]||'#6b7280', bg:(HC[pin.hazard]||'#6b7280')+'15',
-      val:pin.hazard?(HAZARDS.find(h=>h.id===pin.hazard)||{label:''}).label+( pin.comment?' — '+pin.comment:''):null},
+    {key:'comment',      label:'To Repair', color:'#3b82f6', bg:'#eff6ff', val:pin.comment},
+    {key:'fixingComment',label:'Fixing',    color:'#7c3aed', bg:'#f5f3ff', val:pin.fixingComment},
+    {key:'doneComment',  label:'Done',      color:'#16a34a', bg:'#f0fdf4', val:pin.doneComment},
+    {key:'hazard',       label:'Hazard',    color:HC[pin.hazard]||'#6b7280', bg:'#fef9ef',
+      val:pin.hazard?(HAZARDS.find(h=>h.id===pin.hazard)||{label:''}).label:null},
   ];
   const active=stages.filter(s=>s.val&&s.val.trim());
   if(!active.length)return<span style={{color:'#9ca3af',fontSize:11}}>—</span>;
+
+  const toggle=()=>{
+    if(!open&&triggerRef.current){
+      const r=triggerRef.current.getBoundingClientRect();
+      // Position below trigger, but flip up if too close to bottom
+      const spaceBelow=window.innerHeight-r.bottom;
+      const top=spaceBelow>200?r.bottom+6:r.top-6;
+      const left=Math.min(r.left,window.innerWidth-310);
+      setPos({top,left,flipUp:spaceBelow<=200});
+    }
+    setOpen(o=>!o);
+  };
+
+  // Close on outside click
+  useEffect(()=>{
+    if(!open)return;
+    const handler=e=>{if(triggerRef.current&&!triggerRef.current.contains(e.target))setOpen(false);};
+    document.addEventListener('mousedown',handler);
+    return()=>document.removeEventListener('mousedown',handler);
+  },[open]);
+
   return(
-    <div style={{position:'relative'}}>
-      <div style={{display:'flex',flexWrap:'wrap',gap:3,cursor:'pointer'}} onClick={()=>setOpen(o=>!o)}>
+    <div ref={triggerRef} style={{position:'relative',display:'inline-block'}}>
+      <div style={{display:'flex',flexWrap:'wrap',gap:3,cursor:'pointer',alignItems:'center'}} onClick={toggle}>
         {active.map(s=>(
-          <span key={s.key} style={{fontSize:9,fontWeight:700,color:s.color,background:s.bg,padding:'2px 6px',borderRadius:4,fontFamily:'Barlow Condensed',letterSpacing:0.3,border:'1px solid '+s.color+'33',whiteSpace:'nowrap'}}>
+          <span key={s.key} style={{fontSize:9,fontWeight:700,color:s.color,background:s.bg,padding:'2px 7px',borderRadius:4,fontFamily:'Barlow Condensed',letterSpacing:0.3,border:'1px solid '+s.color+'44',whiteSpace:'nowrap'}}>
             {s.label}
           </span>
         ))}
-        <span style={{fontSize:9,color:'#9ca3af',alignSelf:'center'}}>{open?'▲':'▼'}</span>
+        <span style={{fontSize:9,color:'#9ca3af',marginLeft:2}}>{open?'▲':'▼'}</span>
       </div>
-      {open&&(
-        <div style={{position:'absolute',top:'100%',left:0,zIndex:50,marginTop:4,background:'#ffffff',border:'1px solid #e5e7eb',borderRadius:8,padding:'10px 12px',minWidth:220,maxWidth:300,boxShadow:'0 8px 24px rgba(0,0,0,0.12)'}}>
-          {active.map(s=>(
-            <div key={s.key} style={{marginBottom:s===active[active.length-1]?0:8}}>
-              <div style={{fontSize:9,fontWeight:700,color:s.color,marginBottom:3,fontFamily:'Barlow Condensed',letterSpacing:0.5}}>{s.label.toUpperCase()}</div>
-              <div style={{fontSize:11,color:'#374151',lineHeight:1.5,whiteSpace:'pre-wrap'}}>{s.val}</div>
+      {open&&ReactDOM.createPortal(
+        <div
+          onMouseDown={e=>e.stopPropagation()}
+          style={{
+            position:'fixed',
+            top:pos.flipUp?undefined:pos.top,
+            bottom:pos.flipUp?(window.innerHeight-pos.top+4):undefined,
+            left:pos.left,
+            zIndex:9999,
+            background:'#ffffff',
+            border:'1px solid #e5e7eb',
+            borderRadius:10,
+            padding:'12px 14px',
+            minWidth:240,
+            maxWidth:320,
+            boxShadow:'0 12px 32px rgba(0,0,0,0.18)',
+            fontFamily:'Barlow,sans-serif',
+          }}>
+          {active.map((s,i)=>(
+            <div key={s.key} style={{marginBottom:i<active.length-1?10:0}}>
+              <div style={{fontSize:9,fontWeight:700,color:s.color,marginBottom:4,fontFamily:'Barlow Condensed',letterSpacing:1,display:'flex',alignItems:'center',gap:5}}>
+                <span style={{display:'inline-block',width:8,height:8,borderRadius:'50%',background:s.color,flexShrink:0}}/>
+                {s.label.toUpperCase()}
+              </div>
+              <div style={{fontSize:12,color:'#374151',lineHeight:1.55,whiteSpace:'pre-wrap',paddingLeft:13}}>{s.val}</div>
             </div>
           ))}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
