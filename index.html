@@ -71,8 +71,72 @@ const HC={yellow:'#d97706',orange:'#ea580c',red:'#dc2626'};
 const pCol=p=>HC[p.hazard]||'#6b7280';
 const getMeas=(pin,m)=>{const r=RT.find(r=>r.id===pin.repairType);if(!r||!(m||pin.measurements))return'—';return r.calc(m||pin.measurements);};
 const fmtDate=iso=>{if(!iso)return'';const d=new Date(iso);return d.toLocaleDateString('en-NZ')+' '+d.toLocaleTimeString('en-NZ',{hour:'2-digit',minute:'2-digit'});};
-const loadProjs=()=>{try{const d=localStorage.getItem(SKEY);return d?JSON.parse(d):[];}catch{return[];}};
-const saveProjs=list=>{try{localStorage.setItem(SKEY,JSON.stringify(list));}catch(e){alert('Storage full — photos take too much space. The pin was NOT saved. Try smaller photos or fewer per pin.');}};
+// ── INDEXEDDB STORAGE — no size limit, handles large base64 photos ────────────
+const DB_NAME='ral-quicksurvey';
+const DB_VER=1;
+const STORE='projects';
+const PRICE_STORE='prices';
+
+let _db=null;
+function openDB(){
+  if(_db)return Promise.resolve(_db);
+  return new Promise((res,rej)=>{
+    const req=indexedDB.open(DB_NAME,DB_VER);
+    req.onupgradeneeded=e=>{
+      const db=e.target.result;
+      if(!db.objectStoreNames.contains(STORE))db.createObjectStore(STORE,{keyPath:'id'});
+      if(!db.objectStoreNames.contains(PRICE_STORE))db.createObjectStore(PRICE_STORE,{keyPath:'id'});
+    };
+    req.onsuccess=e=>{_db=e.target.result;res(_db);};
+    req.onerror=e=>rej(e.target.error);
+  });
+}
+async function dbGetAll(){
+  const db=await openDB();
+  return new Promise((res,rej)=>{
+    const tx=db.transaction(STORE,'readonly');
+    const req=tx.objectStore(STORE).getAll();
+    req.onsuccess=e=>res(e.target.result||[]);
+    req.onerror=e=>rej(e.target.error);
+  });
+}
+async function dbPut(project){
+  const db=await openDB();
+  return new Promise((res,rej)=>{
+    const tx=db.transaction(STORE,'readwrite');
+    const req=tx.objectStore(STORE).put(project);
+    req.onsuccess=()=>res();
+    req.onerror=e=>rej(e.target.error);
+  });
+}
+async function dbDelete(id){
+  const db=await openDB();
+  return new Promise((res,rej)=>{
+    const tx=db.transaction(STORE,'readwrite');
+    const req=tx.objectStore(STORE).delete(id);
+    req.onsuccess=()=>res();
+    req.onerror=e=>rej(e.target.error);
+  });
+}
+async function dbGetPrices(projectId){
+  const db=await openDB();
+  return new Promise((res)=>{
+    const tx=db.transaction(PRICE_STORE,'readonly');
+    const req=tx.objectStore(PRICE_STORE).get(projectId);
+    req.onsuccess=e=>res(e.target.result?e.target.result.prices:{});
+    req.onerror=()=>res({});
+  });
+}
+async function dbSavePrices(projectId,prices){
+  const db=await openDB();
+  return new Promise((res)=>{
+    const tx=db.transaction(PRICE_STORE,'readwrite');
+    tx.objectStore(PRICE_STORE).put({id:projectId,prices});
+    tx.oncomplete=()=>res();
+    tx.onerror=()=>res();
+  });
+}
+
 
 
 // ── COMPRESS image before watermarking (max 1200px wide, quality 0.65) ────────
@@ -95,7 +159,7 @@ async function compress(dataUrl,maxW=1200,quality=0.65){
 
 // ── WATERMARK ─────────────────────────────────────────────────────────────────
 async function wm(dataUrl,pin){
-  // Compress first to keep localStorage manageable
+  // Compress first to keep IndexedDB storage lean
   const compressed=await compress(dataUrl);
   return new Promise(resolve=>{
     const img=new Image();
@@ -141,8 +205,10 @@ const LS={fontSize:10,color:C.textDim,display:'block',marginBottom:5,fontWeight:
 
 // ── HOME ──────────────────────────────────────────────────────────────────────
 function HomeScreen({onOpen,onCreate}){
-  const [list,setList]=useState(loadProjs);
-  const del=id=>{if(!confirm('Delete this project?'))return;const nl=list.filter(p=>p.id!==id);setList(nl);saveProjs(nl);};
+  const [list,setList]=useState([]);
+  const [loading,setLoading]=useState(true);
+  useEffect(()=>{dbGetAll().then(all=>{setList(all.sort((a,b)=>b.createdAt>a.createdAt?1:-1));setLoading(false);});},[]);
+  const del=async id=>{if(!confirm('Delete this project?'))return;await dbDelete(id);setList(l=>l.filter(p=>p.id!==id));};
   return(
     <div style={{height:'100vh',display:'flex',flexDirection:'column',background:C.bg}}>
       <div style={{background:C.navyDark,padding:'0 24px',display:'flex',alignItems:'center',height:56,flexShrink:0}}>
@@ -160,7 +226,8 @@ function HomeScreen({onOpen,onCreate}){
         <div style={{width:560,maxWidth:'100%'}}>
           <div style={{fontFamily:'Barlow Condensed',fontSize:30,fontWeight:800,color:C.navyDark,marginBottom:4}}>Projects</div>
           <div style={{fontSize:13,color:C.textDim,marginBottom:20}}>Select a project or create a new one</div>
-          {list.length===0&&<div style={{textAlign:'center',color:C.textMuted,fontSize:13,padding:'36px',border:'2px dashed '+C.border,borderRadius:12,marginBottom:14,background:C.card}}>No projects yet</div>}
+          {loading&&<div style={{textAlign:'center',color:C.textMuted,fontSize:13,padding:'36px'}}>Loading...</div>}
+          {!loading&&list.length===0&&<div style={{textAlign:'center',color:C.textMuted,fontSize:13,padding:'36px',border:'2px dashed '+C.border,borderRadius:12,marginBottom:14,background:C.card}}>No projects yet</div>}
           {list.map(p=>{
             const ptotal=p.elevations.reduce((s,e)=>s+(e.pins||[]).length,0);
             const done=p.elevations.reduce((s,e)=>s+(e.pins||[]).filter(pi=>pi.status===ST.DONE).length,0);
@@ -698,8 +765,9 @@ function TrashPanel({project,onRestore,onClose}){
 function SummaryTable({project,onClose}){
   const [photoNav,setPhotoNav]=useState(null);
   const [filter,setFilter]=useState('all');
-  const [prices,setPrices]=useState(()=>{try{const d=localStorage.getItem('ral-prices-'+project.id);return d?JSON.parse(d):{};}catch{return{};}});
-  const savePrice=(name,val)=>{const np={...prices,[name]:val};setPrices(np);try{localStorage.setItem('ral-prices-'+project.id,JSON.stringify(np));}catch{}};
+  const [prices,setPrices]=useState({});
+  useEffect(()=>{dbGetPrices(project.id).then(p=>setPrices(p||{}));},[project.id]);
+  const savePrice=async(name,val)=>{const np={...prices,[name]:val};setPrices(np);await dbSavePrices(project.id,np);};
 
   const allPins=project.elevations.flatMap(e=>(e.pins||[]).map(p=>({...p,_elev:e.name})));
   const types=[...new Set(allPins.map(p=>p.repairType))].filter(Boolean);
@@ -876,7 +944,7 @@ function App(){
   useEffect(()=>{const obs=new ResizeObserver(entries=>{for(const e of entries)setCsz({w:e.contentRect.width,h:e.contentRect.height});});if(cRef.current)obs.observe(cRef.current);return()=>obs.disconnect();},[]);
 
   const showToast=msg=>{setToast(msg);setTimeout(()=>setToast(null),2200);};
-  const persist=p=>{const list=loadProjs();const idx=list.findIndex(x=>x.id===p.id);if(idx>=0)list[idx]=p;else list.unshift(p);saveProjs(list);};
+  const persist=async p=>{await dbPut(p);};
   const openProject=p=>{setProject(p);setRl(p.repairList||[]);const maxId=p.elevations.flatMap(e=>[...(e.pins||[]),...(e.trash||[])]).reduce((m,pi)=>Math.max(m,pi.id),0);setNid(maxId+1);setAe(0);setMode('pan');setScreen('survey');};
   const createProject=(name,names)=>{const p={id:Date.now().toString(),name,createdAt:new Date().toISOString(),user:USER,repairList:[],elevations:names.map(n=>({name:n,img:null,pins:[],trash:[]}))};persist(p);openProject(p);};
 
