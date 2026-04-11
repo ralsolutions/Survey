@@ -770,11 +770,11 @@ function CommentCell({pin}){
   const triggerRef=useRef(null);
 
   const stages=[
-    {key:'comment',      label:'To Repair', color:'#3b82f6', bg:'#eff6ff', val:pin.comment},
-    {key:'fixingComment',label:'Fixing',    color:'#7c3aed', bg:'#f5f3ff', val:pin.fixingComment},
-    {key:'doneComment',  label:'Done',      color:'#16a34a', bg:'#f0fdf4', val:pin.doneComment},
+    {key:'comment',      label:'To Repair', color:'#3b82f6', bg:'#eff6ff', val:pin.comment&&pin.comment.trim()?pin.comment:null},
+    {key:'fixingComment',label:'Fixing',    color:'#7c3aed', bg:'#f5f3ff', val:pin.fixingComment&&pin.fixingComment.trim()?pin.fixingComment:null},
+    {key:'doneComment',  label:'Done',      color:'#16a34a', bg:'#f0fdf4', val:pin.doneComment&&pin.doneComment.trim()?pin.doneComment:null},
     {key:'hazard',       label:'Hazard',    color:HC[pin.hazard]||'#6b7280', bg:'#fef9ef',
-      val:pin.hazard?(HAZARDS.find(h=>h.id===pin.hazard)||{label:''}).label:null},
+      val:pin.hazard&&pin.comment&&pin.comment.trim()?((HAZARDS.find(h=>h.id===pin.hazard)||{label:''}).label+' — '+pin.comment):null},
   ];
   const active=stages.filter(s=>s.val&&s.val.trim());
   if(!active.length)return<span style={{color:'#9ca3af',fontSize:11}}>—</span>;
