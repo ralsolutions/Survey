@@ -199,6 +199,167 @@ async function wm(dataUrl,pin){
   });
 }
 
+// ── DRAWING CANVAS ───────────────────────────────────────────────────────────
+function DrawingCanvas({imageSrc,onClose}){
+  const canvasRef=useRef(null);
+  const [tool,setTool]=useState('pen');
+  const [color,setColor]=useState('#ff3b30');
+  const [size,setSize]=useState(12);
+  const [drawing,setDrawing]=useState(false);
+  const [startPos,setStartPos]=useState(null);
+  const [lastDrawPos,setLastDrawPos]=useState(null);
+  const [baseImage,setBaseImage]=useState(null);
+  const [drawingData,setDrawingData]=useState([]);
+  const ctxRef=useRef(null);
+
+  useEffect(()=>{
+    if(!imageSrc)return;
+    const img=new Image();
+    img.onload=()=>{
+      const c=canvasRef.current;
+      c.width=img.width;
+      c.height=img.height;
+      const ctx=c.getContext('2d');
+      ctx.drawImage(img,0,0);
+      setBaseImage(ctx.getImageData(0,0,c.width,c.height));
+      ctxRef.current=ctx;
+    };
+    img.src=imageSrc;
+  },[imageSrc]);
+
+  const redraw=()=>{
+    const c=canvasRef.current;
+    const ctx=c.getContext('2d');
+    if(baseImage)ctx.putImageData(baseImage,0,0);
+    drawingData.forEach(d=>playback(d));
+  };
+
+  const playback=d=>{
+    const ctx=ctxRef.current;
+    ctx.strokeStyle=d.color;
+    ctx.fillStyle=d.color;
+    ctx.lineWidth=d.size;
+    ctx.lineCap='round';
+    ctx.lineJoin='round';
+    if(d.tool==='pen'){
+      ctx.beginPath();
+      d.points.forEach((p,i)=>{i===0?ctx.moveTo(p.x,p.y):ctx.lineTo(p.x,p.y);});
+      ctx.stroke();
+    }else if(d.tool==='arrow'){
+      const{x1,y1,x2,y2}=d;
+      ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
+      const ah=15,ang=Math.atan2(y2-y1,x2-x1);
+      ctx.beginPath();ctx.moveTo(x2,y2);ctx.lineTo(x2-ah*Math.cos(ang-Math.PI/6),y2-ah*Math.sin(ang-Math.PI/6));
+      ctx.lineTo(x2-ah*Math.cos(ang+Math.PI/6),y2-ah*Math.sin(ang+Math.PI/6));ctx.closePath();ctx.fill();
+    }else if(d.tool==='rect'){
+      ctx.strokeRect(Math.min(d.x1,d.x2),Math.min(d.y1,d.y2),Math.abs(d.x2-d.x1),Math.abs(d.y2-d.y1));
+    }
+  };
+
+  const onMD=e=>{
+    const rect=canvasRef.current.getBoundingClientRect();
+    const x=(e.clientX-rect.left)*(canvasRef.current.width/rect.width);
+    const y=(e.clientY-rect.top)*(canvasRef.current.height/rect.height);
+    setDrawing(true);setStartPos({x,y});
+    if(tool==='pen'){setDrawingData(d=>[...d,{tool:'pen',color,size,points:[{x,y}]}]);}
+  };
+
+  const onMM=e=>{
+    if(!drawing)return;
+    const rect=canvasRef.current.getBoundingClientRect();
+    const x=(e.clientX-rect.left)*(canvasRef.current.width/rect.width);
+    const y=(e.clientY-rect.top)*(canvasRef.current.height/rect.height);
+    const ctx=ctxRef.current;
+    if(tool==='pen'){
+      ctx.strokeStyle=color;ctx.lineWidth=size;ctx.lineCap='round';ctx.lineJoin='round';
+      ctx.beginPath();ctx.lineTo(x,y);ctx.stroke();
+      setDrawingData(d=>{const nd=[...d];nd[nd.length-1].points.push({x,y});return nd;});
+    }else{
+      setLastDrawPos({x,y});
+      redraw();
+      if(tool==='arrow'){
+        const{x1,y1}=startPos;
+        ctx.strokeStyle=color;ctx.lineWidth=size;
+        ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x,y);ctx.stroke();
+        const ah=15,ang=Math.atan2(y-y1,x-x1);
+        ctx.fillStyle=color;
+        ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x-ah*Math.cos(ang-Math.PI/6),y-ah*Math.sin(ang-Math.PI/6));
+        ctx.lineTo(x-ah*Math.cos(ang+Math.PI/6),y-ah*Math.sin(ang+Math.PI/6));ctx.closePath();ctx.fill();
+      }else if(tool==='rect'){
+        ctx.strokeStyle=color;ctx.lineWidth=size;
+        ctx.strokeRect(Math.min(startPos.x,x),Math.min(startPos.y,y),Math.abs(x-startPos.x),Math.abs(y-startPos.y));
+      }
+    }
+  };
+
+  const onMU=()=>{
+    if(!drawing)return;
+    setDrawing(false);
+    if(tool==='arrow'&&startPos&&lastDrawPos){
+      setDrawingData(d=>[...d,{tool:'arrow',color,size,x1:startPos.x,y1:startPos.y,x2:lastDrawPos.x,y2:lastDrawPos.y}]);
+    }else if(tool==='rect'&&startPos&&lastDrawPos){
+      setDrawingData(d=>[...d,{tool:'rect',color,size,x1:startPos.x,y1:startPos.y,x2:lastDrawPos.x,y2:lastDrawPos.y}]);
+    }
+    setStartPos(null);
+    setLastDrawPos(null);
+  };
+
+  const undo=()=>{
+    setDrawingData(d=>d.slice(0,-1));
+    redraw();
+  };
+
+  const clear=()=>{
+    if(!confirm('Clear all drawings?'))return;
+    setDrawingData([]);
+    const c=canvasRef.current;
+    const ctx=c.getContext('2d');
+    if(baseImage)ctx.putImageData(baseImage,0,0);
+  };
+
+  const save=async()=>{
+    const c=canvasRef.current;
+    onClose(c.toDataURL('image/jpeg',0.72));
+  };
+
+  return(
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.9)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',zIndex:300}}>
+      <div style={{padding:'12px 20px',background:'#111827',borderBottom:'1px solid #1e3a5f',width:'100%',display:'flex',justifyContent:'space-between',alignItems:'center',flexShrink:0}}>
+        <span style={{fontSize:14,fontWeight:700,color:'#fff',fontFamily:'Barlow Condensed',letterSpacing:1}}>✎ DRAW ON PHOTO</span>
+        <button onClick={()=>onClose(null)} style={{background:'none',border:'none',color:'#64748b',fontSize:20,cursor:'pointer'}}>×</button>
+      </div>
+      <div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',padding:20,overflowY:'auto',width:'100%'}}>
+        <canvas ref={canvasRef} onMouseDown={onMD} onMouseMove={onMM} onMouseUp={onMU} onMouseLeave={onMU}
+          style={{maxWidth:'90vw',maxHeight:'70vh',border:'2px solid #1e3a5f',borderRadius:8,cursor:tool==='pen'?'crosshair':'default',display:'block'}}/>
+      </div>
+      <div style={{padding:'12px 20px',background:'#111827',borderTop:'1px solid #1e3a5f',width:'100%',display:'flex',gap:8,flexWrap:'wrap',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
+        <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
+          {['pen','arrow','rect'].map(t=>(
+            <button key={t} onClick={()=>setTool(t)}
+              style={{padding:'5px 12px',borderRadius:5,border:'1px solid '+(tool===t?'#2563eb':'#1e3a5f'),background:tool===t?'#2563eb22':'transparent',color:tool===t?'#2563eb':'#64748b',fontSize:12,cursor:'pointer',fontWeight:tool===t?700:400,fontFamily:'Barlow Condensed'}}>
+              {t==='pen'?'✏ Pen':t==='arrow'?'→ Arrow':'▢ Rect'}
+            </button>
+          ))}
+          <div style={{width:24,height:28,borderRadius:4,border:'2px solid '+color,background:color,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+            <input type="color" value={color} onChange={e=>setColor(e.target.value)} style={{opacity:0,width:0,height:0,cursor:'pointer'}}/>
+          </div>
+          <div style={{display:'flex',alignItems:'center',gap:4}}>
+            <span style={{fontSize:10,color:'#64748b',fontFamily:'DM Mono'}}>Size</span>
+            <input type="range" min="1" max="12" value={size} onChange={e=>setSize(parseInt(e.target.value))}
+              style={{width:50,height:4,cursor:'pointer'}}/>
+            <span style={{fontSize:9,color:'#64748b',fontFamily:'DM Mono',minWidth:12}}>{size}</span>
+          </div>
+        </div>
+        <div style={{display:'flex',gap:6}}>
+          <button onClick={undo} style={{padding:'6px 12px',borderRadius:5,border:'1px solid #475569',background:'transparent',color:'#64748b',fontSize:11,cursor:'pointer',fontFamily:'Barlow Condensed'}}>↶ UNDO</button>
+          <button onClick={clear} style={{padding:'6px 12px',borderRadius:5,border:'1px solid #ef444444',background:'transparent',color:'#ef444488',fontSize:11,cursor:'pointer',fontFamily:'Barlow Condensed'}}>✕ CLEAR</button>
+          <button onClick={save} style={{padding:'6px 14px',borderRadius:5,border:'1px solid #22c55e',background:'#22c55e22',color:'#22c55e',fontSize:12,fontWeight:700,cursor:'pointer',fontFamily:'Barlow Condensed'}}>✓ SAVE</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── STYLES ────────────────────────────────────────────────────────────────────
 const IS={width:'100%',background:C.card,border:'1px solid '+C.border,borderRadius:7,padding:'9px 12px',color:C.text,fontSize:13,outline:'none',fontFamily:'Barlow,sans-serif'};
 const LS={fontSize:10,color:C.textDim,display:'block',marginBottom:5,fontWeight:600,letterSpacing:1.2};
@@ -342,6 +503,7 @@ function PinModal({pin,repairList,onSave,onTrash,onClose,onAddRT}){
   const [staging,setStaging]=useState([]);
   const [saving,setSaving]=useState(false);
   const [photoNav,setPhotoNav]=useState(null);
+  const [drawingMode,setDrawingMode]=useState(null);
 
   // Track if meas changed vs original pin (used only in fixing/done views)
   const [origMeas,setOrigMeas]=useState(null); // set when entering fixing/done
@@ -413,6 +575,7 @@ function PinModal({pin,repairList,onSave,onTrash,onClose,onAddRT}){
           {staging.map((p,i)=>(
             <div key={i} style={{position:'relative',width:60,height:48,borderRadius:6,overflow:'hidden',border:'1px solid '+C.border}}>
               <img src={p} style={{width:'100%',height:'100%',objectFit:'cover'}} alt=""/>
+              <button onClick={()=>setDrawingMode(i)} style={{position:'absolute',bottom:1,right:1,background:'#2563eb99',border:'none',borderRadius:'50%',color:'#fff',width:18,height:18,cursor:'pointer',fontSize:10,display:'flex',alignItems:'center',justifyContent:'center',padding:0}} title="Draw on photo">✎</button>
               <button onClick={()=>setStaging(s=>s.filter((_,j)=>j!==i))} style={{position:'absolute',top:1,right:1,background:'rgba(220,38,38,0.85)',border:'none',borderRadius:'50%',color:'#fff',width:16,height:16,cursor:'pointer',fontSize:9,display:'flex',alignItems:'center',justifyContent:'center'}}>×</button>
             </div>
           ))}
@@ -430,6 +593,13 @@ function PinModal({pin,repairList,onSave,onTrash,onClose,onAddRT}){
 
   const statusColor=SC[cur]||C.blue;
   const hbc=HC[hazard]||C.border;
+
+  if(drawingMode!==null){
+    return<DrawingCanvas imageSrc={staging[drawingMode]} onClose={drawn=>{
+      if(drawn){setStaging(s=>{const ns=[...s];ns[drawingMode]=drawn;return ns;});}
+      setDrawingMode(null);
+    }}/>;
+  }
 
   return(
     <div onClick={onClose} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:200,padding:16}}>
