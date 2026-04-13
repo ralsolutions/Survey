@@ -2,17 +2,24 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="theme-color" content="#111827"/>
 <title>Quick Survey — RAL</title>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=Barlow:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-*{box-sizing:border-box;margin:0;padding:0;}
-body{font-family:'Barlow',sans-serif;background:#e4e7ec;color:#111827;height:100vh;overflow:hidden;}
-#root{height:100vh;}
-::-webkit-scrollbar{width:3px;}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html,body{font-family:'Barlow',sans-serif;background:#e4e7ec;color:#111827;height:100%;overflow:hidden;overscroll-behavior:none;}
+body{padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom);}
+#root{height:100%;}
+input,textarea,select{font-size:16px;} /* prevents iOS zoom-on-focus */
+button{touch-action:manipulation;}
+::-webkit-scrollbar{width:3px;height:3px;}
 ::-webkit-scrollbar-track{background:#d1d5db;}
 ::-webkit-scrollbar-thumb{background:#1e3a5f;border-radius:2px;}
 </style>
@@ -42,6 +49,17 @@ const C={
   fixing:'#8b5cf6',
   done:'#22c55e',
 };
+
+// ── MOBILE DETECTION ──────────────────────────────────────────────────────────
+function useIsMobile(bp=900){
+  const [m,setM]=useState(typeof window!=='undefined'?window.innerWidth<bp:false);
+  useEffect(()=>{
+    const h=()=>setM(window.innerWidth<bp);
+    window.addEventListener('resize',h);
+    return()=>window.removeEventListener('resize',h);
+  },[bp]);
+  return m;
+}
 
 const ST={TOREPAIR:'torepair',FIXING:'fixing',DONE:'done'};
 const SC={torepair:C.torepair,fixing:C.fixing,done:C.done};
@@ -568,7 +586,7 @@ function PhotoNav({photos,initIdx=0,onClose}){
 }
 
 // ── PIN MODAL ─────────────────────────────────────────────────────────────────
-function PinModal({pin,repairList,onSave,onTrash,onClose,onAddRT}){
+function PinModal({pin,repairList,onSave,onTrash,onClose,onAddRT,isMobile}){
   const isNew=!pin.repairName;
   const [view,setView]=useState(isNew?(repairList.length>0?'choose':'new'):'status');
   const [selR,setSelR]=useState(repairList.find(r=>r.name===pin.repairName)||null);
@@ -678,10 +696,10 @@ function PinModal({pin,repairList,onSave,onTrash,onClose,onAddRT}){
   }
 
   return(
-    <div onClick={onClose} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:200,padding:16}}>
-      <div onClick={e=>e.stopPropagation()} style={{background:C.card,border:'1px solid '+(isNew?C.border:hbc+'55'),borderRadius:14,width:390,maxHeight:'92vh',overflowY:'auto',boxShadow:'0 20px 60px rgba(0,0,0,0.2)'}}>
+    <div onClick={onClose} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',display:'flex',alignItems:isMobile?'flex-end':'center',justifyContent:'center',zIndex:200,padding:isMobile?0:16}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:C.card,border:'1px solid '+(isNew?C.border:hbc+'55'),borderRadius:isMobile?'16px 16px 0 0':14,width:isMobile?'100%':390,maxWidth:'100%',maxHeight:isMobile?'94vh':'92vh',overflowY:'auto',boxShadow:'0 -10px 40px rgba(0,0,0,0.25)',paddingBottom:isMobile?'env(safe-area-inset-bottom)':0}}>
 
-        <div style={{padding:'13px 17px',display:'flex',justifyContent:'space-between',alignItems:'center',background:C.navyDark,borderRadius:'14px 14px 0 0'}}>
+        <div style={{padding:'13px 17px',display:'flex',justifyContent:'space-between',alignItems:'center',background:C.navyDark,borderRadius:isMobile?'16px 16px 0 0':'14px 14px 0 0',position:'sticky',top:0,zIndex:2}}>
           <div style={{display:'flex',alignItems:'center',gap:9}}>
             <div style={{background:pCol(pin),borderRadius:'50%',width:26,height:26,display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:700,color:'#fff',fontFamily:'DM Mono'}}>{pin.id}</div>
             <span style={{fontSize:14,fontWeight:700,color:'#fff',fontFamily:'Barlow Condensed',letterSpacing:0.5}}>PIN #{pin.id}</span>
@@ -1222,9 +1240,11 @@ function Marker({pin,selected,isMoving,isDeleting,onClick,x,y}){
   const headColor=pCol(pin);
   const stemColor=SC[pin.status]||'#6b7280';
   const sz=isMoving||selected||isDeleting?28:22;
+  const handle=e=>{e.stopPropagation();onClick(pin.id);};
   return(
-    <div onClick={e=>{e.stopPropagation();onClick(pin.id);}} style={{position:'absolute',left:x,top:y,transform:'translate(-50%,-100%)',cursor:isDeleting?'not-allowed':'pointer',zIndex:10,userSelect:'none'}}>
-      <div style={{display:'flex',flexDirection:'column',alignItems:'center'}}>
+    <div onClick={handle} onTouchEnd={e=>{e.stopPropagation();e.preventDefault();onClick(pin.id);}}
+      style={{position:'absolute',left:x,top:y,transform:'translate(-50%,-100%)',cursor:isDeleting?'not-allowed':'pointer',zIndex:10,userSelect:'none',padding:12,margin:-12,touchAction:'manipulation'}}>
+      <div style={{display:'flex',flexDirection:'column',alignItems:'center',pointerEvents:'none'}}>
         <div style={{background:isDeleting?'#dc2626':isMoving?'#ea580c':selected?'#fff':headColor,color:isDeleting||isMoving?'#fff':selected?headColor:'#fff',border:'2px solid '+(isDeleting?'#dc2626':isMoving?'#ea580c':headColor),borderRadius:'50%',width:sz,height:sz,display:'flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:700,fontFamily:'DM Mono',boxShadow:selected?'0 0 0 3px '+headColor+'44,0 2px 10px rgba(0,0,0,0.35)':'0 2px 8px rgba(0,0,0,0.35)',transition:'all 0.15s'}}>{isDeleting?'✕':pin.id}</div>
         <div style={{width:2,height:10,background:stemColor,opacity:0.95}}/>
         <div style={{width:7,height:7,borderRadius:'50%',background:stemColor,boxShadow:'0 1px 4px '+stemColor+'88'}}/>
@@ -1239,6 +1259,7 @@ function Toast({msg}){
 
 // ── MAIN APP ─────────────────────────────────────────────────────────────────
 function App(){
+  const isMobile=useIsMobile();
   const [screen,setScreen]=useState('home');
   const [project,setProject]=useState(null);
   const [rl,setRl]=useState([]);
@@ -1247,17 +1268,31 @@ function App(){
   const [movId,setMovId]=useState(null);
   const [zoom,setZoom]=useState(1);
   const [pan,setPan]=useState({x:0,y:0});
-  const [drag,setDrag]=useState(false);
-  const [ds,setDs]=useState(null);
   const [selPin,setSelPin]=useState(null);
   const [modal,setModal]=useState(null);
   const [nid,setNid]=useState(1);
   const [csz,setCsz]=useState({w:800,h:600});
   const [showT,setShowT]=useState(false);
   const [showTrash,setShowTrash]=useState(false);
+  const [showMore,setShowMore]=useState(false);
+  const [showIndex,setShowIndex]=useState(false);
   const [toast,setToast]=useState(null);
   const cRef=useRef(null);
   const iRef=useRef(null);
+
+  // Gesture state in refs — avoids stale closures, same fix as drawing canvas
+  const gestureRef=useRef({
+    panning:false,         // single-finger pan in progress
+    pinching:false,        // two-finger zoom in progress
+    tapCandidate:false,    // touch started — might become a tap on touchend
+    moved:false,           // did finger move more than threshold?
+    startX:0,startY:0,
+    startPanX:0,startPanY:0,
+    startDist:0,
+    startZoom:1,
+    startMidX:0,startMidY:0,
+    tapPos:null,           // coords at touchstart for later tap placement
+  });
 
   useEffect(()=>{const obs=new ResizeObserver(entries=>{for(const e of entries)setCsz({w:e.contentRect.width,h:e.contentRect.height});});if(cRef.current)obs.observe(cRef.current);return()=>obs.disconnect();},[]);
 
@@ -1277,18 +1312,160 @@ function App(){
     };
     fr.readAsDataURL(f);
   };
-  const onWheel=e=>{e.preventDefault();setZoom(z=>Math.min(8,Math.max(0.3,z*(e.deltaY>0?0.85:1.18))));};
-  const imgC=e=>{const img=iRef.current;if(!img)return null;const r=img.getBoundingClientRect();const x=(e.clientX-r.left)/r.width*100,y=(e.clientY-r.top)/r.height*100;if(x<0||x>100||y<0||y>100)return null;return{x,y};};
-  const cntC=e=>{const c=cRef.current;if(!c)return null;const r=c.getBoundingClientRect();return{x:(e.clientX-r.left)/r.width*100,y:(e.clientY-r.top)/r.height*100};};
-  const onMD=e=>{if(mode==='pan'){setDrag(true);setDs({x:e.clientX-pan.x,y:e.clientY-pan.y});}};
-  const onMM=e=>{if(drag&&mode==='pan')setPan({x:e.clientX-ds.x,y:e.clientY-ds.y});};
-  const onMU=()=>setDrag(false);
-  const onCanvas=e=>{
-    if(drag)return;
-    const coords=el?.img?imgC(e):cntC(e);if(!coords)return;
-    if(mode==='pin'){const p={id:nid,x:coords.x,y:coords.y,repairName:'',repairType:'linear',measurements:{},comment:'',hazard:'yellow',status:ST.TOREPAIR,surveyPhotos:[],fixingPhotos:[],donePhotos:[]};upd(ae,el=>({...el,pins:[...el.pins,p]}));setNid(n=>n+1);setModal(p);}
-    else if(mode==='move-pin'&&movId){upd(ae,el=>({...el,pins:el.pins.map(p=>p.id===movId?{...p,...coords}:p)}));setMovId(null);setMode('pan');}
+
+  // Coordinate extraction for mouse click (used on desktop)
+  const clickCoords=e=>{
+    if(el?.img){
+      const img=iRef.current;if(!img)return null;
+      const r=img.getBoundingClientRect();
+      const x=(e.clientX-r.left)/r.width*100,y=(e.clientY-r.top)/r.height*100;
+      if(x<0||x>100||y<0||y>100)return null;
+      return{x,y};
+    }else{
+      const c=cRef.current;if(!c)return null;
+      const r=c.getBoundingClientRect();
+      return{x:(e.clientX-r.left)/r.width*100,y:(e.clientY-r.top)/r.height*100};
+    }
   };
+
+  // Coordinate extraction for touch tap — reads image/canvas rect in its current transformed state
+  const tapCoordsFromClient=(cx,cy)=>{
+    if(el?.img){
+      const img=iRef.current;if(!img)return null;
+      const r=img.getBoundingClientRect();
+      const x=(cx-r.left)/r.width*100,y=(cy-r.top)/r.height*100;
+      if(x<0||x>100||y<0||y>100)return null;
+      return{x,y};
+    }else{
+      const c=cRef.current;if(!c)return null;
+      const r=c.getBoundingClientRect();
+      return{x:(cx-r.left)/r.width*100,y:(cy-r.top)/r.height*100};
+    }
+  };
+
+  const placeOrHandleCoords=coords=>{
+    if(mode==='pin'){
+      const p={id:nid,x:coords.x,y:coords.y,repairName:'',repairType:'linear',measurements:{},comment:'',hazard:'yellow',status:ST.TOREPAIR,surveyPhotos:[],fixingPhotos:[],donePhotos:[]};
+      upd(ae,el=>({...el,pins:[...el.pins,p]}));
+      setNid(n=>n+1);
+      setModal(p);
+    }else if(mode==='move-pin'&&movId){
+      upd(ae,el=>({...el,pins:el.pins.map(p=>p.id===movId?{...p,...coords}:p)}));
+      setMovId(null);
+      setMode('pan');
+    }
+  };
+
+  // Desktop: wheel zoom + mouse drag pan
+  const onWheel=e=>{e.preventDefault();setZoom(z=>Math.min(8,Math.max(0.3,z*(e.deltaY>0?0.85:1.18))));};
+  const mouseDragRef=useRef({dragging:false,sx:0,sy:0,spx:0,spy:0});
+  const onMouseDown=e=>{
+    if(mode!=='pan'||isMobile)return;
+    mouseDragRef.current={dragging:true,sx:e.clientX,sy:e.clientY,spx:pan.x,spy:pan.y};
+  };
+  const onMouseMove=e=>{
+    if(!mouseDragRef.current.dragging)return;
+    const d=mouseDragRef.current;
+    setPan({x:d.spx+(e.clientX-d.sx),y:d.spy+(e.clientY-d.sy)});
+  };
+  const onMouseUp=()=>{mouseDragRef.current.dragging=false;};
+  const onCanvasClick=e=>{
+    if(mouseDragRef.current.sx!==undefined){
+      // Suppress click if we actually dragged
+      const moved=Math.abs(e.clientX-mouseDragRef.current.sx)>3||Math.abs(e.clientY-mouseDragRef.current.sy)>3;
+      if(moved){mouseDragRef.current.sx=undefined;return;}
+    }
+    const coords=clickCoords(e);
+    if(coords)placeOrHandleCoords(coords);
+  };
+
+  // Touch handlers — native listeners via useEffect so preventDefault actually works
+  useEffect(()=>{
+    const c=cRef.current;
+    if(!c)return;
+    const g=gestureRef.current;
+    const dist=(t1,t2)=>{const dx=t1.clientX-t2.clientX,dy=t1.clientY-t2.clientY;return Math.sqrt(dx*dx+dy*dy);};
+    const mid=(t1,t2)=>({x:(t1.clientX+t2.clientX)/2,y:(t1.clientY+t2.clientY)/2});
+
+    const ts=e=>{
+      if(e.touches.length===1){
+        const t=e.touches[0];
+        g.panning=(mode==='pan');
+        g.pinching=false;
+        g.tapCandidate=true;
+        g.moved=false;
+        g.startX=t.clientX;g.startY=t.clientY;
+        g.startPanX=pan.x;g.startPanY=pan.y;
+        g.tapPos={cx:t.clientX,cy:t.clientY};
+      }else if(e.touches.length===2){
+        e.preventDefault();
+        g.panning=false;
+        g.pinching=true;
+        g.tapCandidate=false;
+        g.startDist=dist(e.touches[0],e.touches[1]);
+        g.startZoom=zoom;
+        const m=mid(e.touches[0],e.touches[1]);
+        g.startMidX=m.x;g.startMidY=m.y;
+        g.startPanX=pan.x;g.startPanY=pan.y;
+      }
+    };
+
+    const tm=e=>{
+      if(g.pinching&&e.touches.length>=2){
+        e.preventDefault();
+        const d=dist(e.touches[0],e.touches[1]);
+        const ratio=d/g.startDist;
+        const newZoom=Math.min(8,Math.max(0.3,g.startZoom*ratio));
+        setZoom(newZoom);
+        // Keep pinch midpoint roughly stable — approximate pan adjustment
+        const m=mid(e.touches[0],e.touches[1]);
+        setPan({
+          x:g.startPanX+(m.x-g.startMidX),
+          y:g.startPanY+(m.y-g.startMidY)
+        });
+      }else if(g.panning&&e.touches.length===1){
+        const t=e.touches[0];
+        const dx=t.clientX-g.startX,dy=t.clientY-g.startY;
+        if(Math.abs(dx)>5||Math.abs(dy)>5){
+          g.moved=true;
+          g.tapCandidate=false;
+          e.preventDefault();
+          setPan({x:g.startPanX+dx,y:g.startPanY+dy});
+        }
+      }
+    };
+
+    const te=e=>{
+      if(g.tapCandidate&&!g.moved&&g.tapPos){
+        // Genuine tap — place pin or select pin
+        const coords=tapCoordsFromClient(g.tapPos.cx,g.tapPos.cy);
+        if(coords)placeOrHandleCoords(coords);
+      }
+      if(e.touches.length===0){
+        g.panning=false;g.pinching=false;g.tapCandidate=false;g.moved=false;g.tapPos=null;
+      }else if(e.touches.length===1&&g.pinching){
+        // Transitioned from pinch to single finger — restart pan baseline
+        g.pinching=false;
+        g.panning=(mode==='pan');
+        g.startX=e.touches[0].clientX;
+        g.startY=e.touches[0].clientY;
+        g.startPanX=pan.x;g.startPanY=pan.y;
+        g.tapCandidate=false;
+      }
+    };
+
+    c.addEventListener('touchstart',ts,{passive:false});
+    c.addEventListener('touchmove',tm,{passive:false});
+    c.addEventListener('touchend',te,{passive:false});
+    c.addEventListener('touchcancel',te,{passive:false});
+    return()=>{
+      c.removeEventListener('touchstart',ts);
+      c.removeEventListener('touchmove',tm);
+      c.removeEventListener('touchend',te);
+      c.removeEventListener('touchcancel',te);
+    };
+  },[mode,pan.x,pan.y,zoom,el?.img,nid,movId,ae]);
+
   const onPin=id=>{
     if(mode==='move-pin'){setMovId(id);return;}
     if(mode==='delete-pin'){const pin=el.pins.find(p=>p.id===id);const name=pin?pin.repairName||('Pin #'+id):'Pin #'+id;if(!confirm('Move "'+name+'" to trash?'))return;upd(ae,el=>{const pin=el.pins.find(p=>p.id===id);if(!pin)return el;return{...el,pins:el.pins.filter(p=>p.id!==id),trash:[...(el.trash||[]),{...pin,deletedAt:new Date().toISOString()}]};});setMode('pan');showToast('🗑 Pin #'+id+' moved to trash');return;}
@@ -1306,12 +1483,164 @@ function App(){
   const trashCount=project.elevations.reduce((s,e)=>s+(e.trash||[]).length,0);
   const iW=iRef.current?.offsetWidth||1,iH=iRef.current?.offsetHeight||1;
   const total=project.elevations.reduce((s,e)=>s+(e.pins||[]).length,0);
-  const hint=mode==='pin'?'📍 Click to place a pin':mode==='move-pin'?(movId?'Moving #'+movId+' — click to reposition':'Click a pin to move'):mode==='delete-pin'?'🗑 Click a pin to trash it':'✋ Drag to pan · scroll to zoom';
+  const hint=mode==='pin'?(isMobile?'📍 Tap to place a pin':'📍 Click to place a pin'):mode==='move-pin'?(movId?'Moving #'+movId+' — tap to reposition':'Tap a pin to move'):mode==='delete-pin'?'🗑 Tap a pin to trash it':(isMobile?'✋ Drag to pan · pinch to zoom':'✋ Drag to pan · scroll to zoom');
   const modes=[{id:'pan',i:'✋',l:'Pan / View'},{id:'pin',i:'📍',l:'Add Pin'},{id:'move-pin',i:'↔',l:'Move Pin'},{id:'delete-pin',i:'🗑',l:'Delete Pin',danger:true}];
   const statusCounts={[ST.TOREPAIR]:pins.filter(p=>p.status===ST.TOREPAIR).length,[ST.FIXING]:pins.filter(p=>p.status===ST.FIXING).length,[ST.DONE]:pins.filter(p=>p.status===ST.DONE).length};
 
+  // ─── MOBILE LAYOUT ─────────────────────────────────────────────────────────
+  if(isMobile){
+    return(
+      <div style={{display:'flex',flexDirection:'column',height:'100%',background:C.bg,overflow:'hidden',userSelect:'none'}}>
+        {/* TOP BAR */}
+        <div style={{background:C.navyDark,padding:'0 12px',height:48,display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
+          <button onClick={()=>setScreen('home')} style={{background:'none',border:'1px solid #1e3a5f',borderRadius:6,color:'#94a3b8',fontSize:16,cursor:'pointer',padding:'6px 10px',minWidth:40,minHeight:36}}>⌂</button>
+          <div style={{flex:1,textAlign:'center',minWidth:0,padding:'0 10px'}}>
+            <div style={{fontSize:14,fontWeight:700,color:'#f1f5f9',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontFamily:'Barlow Condensed',letterSpacing:0.5}}>{project.name}</div>
+            <div style={{fontSize:9,color:'#475569',fontFamily:'DM Mono'}}>{total} pin{total!==1?'s':''} · {statusCounts[ST.DONE]} done</div>
+          </div>
+          <button onClick={()=>setShowIndex(true)} disabled={pins.length===0} style={{background:pins.length?C.blueDim:'transparent',border:'1px solid '+(pins.length?'#1e3a5f':'#1e3a5f44'),borderRadius:6,color:pins.length?'#93c5fd':'#334155',fontSize:11,cursor:'pointer',padding:'6px 10px',minWidth:40,minHeight:36,fontFamily:'Barlow Condensed',fontWeight:700}}>≡ {pins.length||''}</button>
+        </div>
+
+        {/* ELEVATION TABS */}
+        <div style={{display:'flex',background:C.card,borderBottom:'1px solid '+C.border,overflowX:'auto',flexShrink:0}}>
+          {project.elevations.map((e,i)=>{
+            const ep=e.pins||[];const ed=ep.filter(p=>p.status===ST.DONE).length;
+            return(
+              <button key={i} onClick={()=>{setAe(i);setMode('pan');setMovId(null);setSelPin(null);setZoom(1);setPan({x:0,y:0});}}
+                style={{padding:'10px 14px',border:'none',borderBottom:'3px solid '+(i===ae?C.navyDark:'transparent'),background:'transparent',color:i===ae?C.navyDark:C.textDim,fontSize:13,fontWeight:i===ae?700:400,cursor:'pointer',whiteSpace:'nowrap',display:'flex',alignItems:'center',gap:6,fontFamily:'Barlow Condensed',minHeight:44}}>
+                {e.name.toUpperCase()}
+                {ep.length>0&&<span style={{fontSize:10,color:i===ae?C.navyMid:C.textMuted,background:i===ae?C.blueDim:'#f3f4f6',padding:'1px 6px',borderRadius:8,fontFamily:'DM Mono'}}>{ed}/{ep.length}</span>}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* CANVAS */}
+        <div ref={cRef}
+          style={{flex:1,position:'relative',overflow:'hidden',background:'#d8dce4',touchAction:'none'}}
+          onClick={!isMobile?onCanvasClick:undefined}>
+          {!el?.img?(
+            <>
+              <div style={{position:'absolute',inset:0,backgroundImage:'linear-gradient('+C.border+' 1px,transparent 1px),linear-gradient(90deg,'+C.border+' 1px,transparent 1px)',backgroundSize:'32px 32px',pointerEvents:'none',opacity:0.8}}/>
+              <div style={{position:'absolute',inset:0,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:8,pointerEvents:'none',padding:20,textAlign:'center'}}>
+                <div style={{fontSize:48,opacity:0.15}}>🏢</div>
+                <div style={{fontSize:11,color:C.textMuted,fontFamily:'Barlow Condensed',letterSpacing:1}}>NO PHOTO — TAP ⋯ TO LOAD ONE</div>
+                <div style={{fontSize:10,color:C.textMuted,fontFamily:'Barlow Condensed',maxWidth:260}}>Pins will float on the grid until you add a photo of the elevation.</div>
+              </div>
+              {pins.map(p=><Marker key={p.id} pin={p} selected={selPin===p.id} isMoving={movId===p.id} isDeleting={mode==='delete-pin'} onClick={onPin} x={p.x*csz.w/100} y={p.y*csz.h/100}/>)}
+            </>
+          ):(
+            <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center'}}>
+              <div style={{transform:'translate('+pan.x+'px,'+pan.y+'px) scale('+zoom+')',transformOrigin:'center center',position:'relative',display:'inline-block',willChange:'transform'}}>
+                <img ref={iRef} src={el.img} alt="" style={{display:'block',maxWidth:'100vw',maxHeight:'calc(100vh - 200px)',objectFit:'contain',pointerEvents:'none'}} draggable={false}/>
+                <div style={{position:'absolute',inset:0}}>
+                  {pins.map(p=><Marker key={p.id} pin={p} selected={selPin===p.id} isMoving={movId===p.id} isDeleting={mode==='delete-pin'} onClick={onPin} x={p.x*iW/100} y={p.y*iH/100}/>)}
+                </div>
+              </div>
+            </div>
+          )}
+          <div style={{position:'absolute',top:10,left:'50%',transform:'translateX(-50%)',background:'rgba(17,24,39,0.88)',border:'1px solid rgba(255,255,255,0.08)',borderRadius:14,padding:'4px 12px',fontSize:10,color:mode==='pin'||mode==='move-pin'?'#93c5fd':mode==='delete-pin'?'#fca5a5':'#94a3b8',pointerEvents:'none',fontFamily:'Barlow Condensed',letterSpacing:0.3,whiteSpace:'nowrap',maxWidth:'90vw',overflow:'hidden',textOverflow:'ellipsis'}}>{hint}</div>
+        </div>
+
+        {/* BOTTOM TOOLBAR */}
+        <div style={{background:C.navyDark,borderTop:'1px solid #1e3a5f',display:'flex',alignItems:'stretch',flexShrink:0,height:58,paddingBottom:'env(safe-area-inset-bottom)'}}>
+          {modes.map(m=>{
+            const active=mode===m.id;const danger=m.danger;
+            const col=active?(danger?'#fca5a5':'#93c5fd'):(danger?'#64748b':'#94a3b8');
+            return(
+              <button key={m.id} onClick={()=>{setMode(m.id);if(m.id!=='move-pin')setMovId(null);}}
+                style={{flex:1,background:active?(danger?'rgba(220,38,38,0.15)':'rgba(37,99,235,0.18)'):'transparent',border:'none',borderTop:'2px solid '+(active?(danger?'#dc2626':C.blue):'transparent'),color:col,cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:2,fontFamily:'Barlow Condensed',padding:'4px 2px'}}>
+                <span style={{fontSize:18,lineHeight:1}}>{m.i}</span>
+                <span style={{fontSize:9,fontWeight:700,letterSpacing:0.5}}>{m.l.split(' ')[0].toUpperCase()}</span>
+              </button>
+            );
+          })}
+          <div style={{width:1,background:'#1e3a5f',margin:'8px 0'}}/>
+          <button onClick={()=>setZoom(z=>Math.min(8,z*1.3))} style={{flex:0.7,background:'transparent',border:'none',color:'#94a3b8',cursor:'pointer',fontSize:20,fontWeight:700}}>+</button>
+          <button onClick={()=>setZoom(z=>Math.max(0.3,z*0.77))} style={{flex:0.7,background:'transparent',border:'none',color:'#94a3b8',cursor:'pointer',fontSize:20,fontWeight:700}}>−</button>
+          <div style={{width:1,background:'#1e3a5f',margin:'8px 0'}}/>
+          <button onClick={()=>setShowMore(true)} style={{flex:0.8,background:'transparent',border:'none',color:'#94a3b8',cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:2,fontFamily:'Barlow Condensed'}}>
+            <span style={{fontSize:18,lineHeight:1}}>⋯</span>
+            <span style={{fontSize:9,fontWeight:700,letterSpacing:0.5}}>MORE</span>
+          </button>
+        </div>
+
+        {/* MORE BOTTOM SHEET */}
+        {showMore&&(
+          <div onClick={()=>setShowMore(false)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',zIndex:260,display:'flex',alignItems:'flex-end'}}>
+            <div onClick={e=>e.stopPropagation()} style={{background:C.card,width:'100%',borderRadius:'16px 16px 0 0',padding:'10px 16px 20px',paddingBottom:'calc(20px + env(safe-area-inset-bottom))',boxShadow:'0 -10px 40px rgba(0,0,0,0.2)',maxHeight:'80vh',overflowY:'auto'}}>
+              <div style={{width:40,height:4,background:C.border,borderRadius:2,margin:'0 auto 14px'}}/>
+              <label style={{display:'block',padding:'14px',border:'1px dashed '+C.borderDark,borderRadius:10,color:C.textDim,fontSize:13,cursor:'pointer',textAlign:'center',background:C.surface,marginBottom:10,fontFamily:'Barlow Condensed',fontWeight:600}}>
+                {el?.img?'🔄 CHANGE ELEVATION PHOTO':'📷 LOAD ELEVATION PHOTO'}
+                <input type="file" accept="image/*" capture="environment" style={{display:'none'}} onChange={e=>{onPhoto(e);setShowMore(false);}}/>
+              </label>
+              <button onClick={()=>{setZoom(1);setPan({x:0,y:0});setShowMore(false);}} style={{width:'100%',padding:'12px',borderRadius:10,border:'1px solid '+C.border,background:C.surface,color:C.textDim,fontSize:13,fontWeight:600,cursor:'pointer',marginBottom:10,fontFamily:'Barlow Condensed'}}>⟲ RESET ZOOM ({Math.round(zoom*100)}%)</button>
+              {pins.length>0&&(
+                <div style={{padding:'12px',background:C.surface,border:'1px solid '+C.border,borderRadius:10,marginBottom:10}}>
+                  <div style={{fontSize:10,color:C.textMuted,letterSpacing:1.5,marginBottom:8,fontFamily:'Barlow Condensed',fontWeight:700}}>THIS ELEVATION</div>
+                  {[ST.TOREPAIR,ST.FIXING,ST.DONE].map(s=>(
+                    <div key={s} style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:5}}>
+                      <div style={{display:'flex',alignItems:'center',gap:8}}><div style={{width:8,height:8,borderRadius:'50%',background:SC[s]}}/><span style={{fontSize:12,color:C.textDim,fontFamily:'Barlow Condensed'}}>{SL[s]}</span></div>
+                      <span style={{fontSize:13,color:SC[s],fontFamily:'DM Mono',fontWeight:700}}>{statusCounts[s]}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <button onClick={()=>{setShowT(true);setShowMore(false);}} style={{width:'100%',padding:'13px',borderRadius:10,border:'1px solid '+C.blue,background:C.blueDim,color:C.blue,fontSize:13,fontWeight:700,cursor:'pointer',marginBottom:8,fontFamily:'Barlow Condensed'}}>📊 SUMMARY {total>0?'('+total+' PINS)':''}</button>
+              <button onClick={()=>{setShowTrash(true);setShowMore(false);}} style={{width:'100%',padding:'13px',borderRadius:10,border:'1px solid '+(trashCount>0?'#dc262630':C.border),background:C.card,color:trashCount>0?'#dc2626aa':C.textMuted,fontSize:13,fontWeight:600,cursor:'pointer',marginBottom:8,fontFamily:'Barlow Condensed'}}>🗑 TRASH {trashCount>0?'('+trashCount+')':''}</button>
+              {rl.length>0&&(
+                <div style={{padding:'12px',background:C.surface,border:'1px solid '+C.border,borderRadius:10,marginBottom:4,maxHeight:140,overflowY:'auto'}}>
+                  <div style={{fontSize:10,color:C.textMuted,letterSpacing:1.5,marginBottom:6,fontFamily:'Barlow Condensed',fontWeight:700}}>REPAIRS ({rl.length})</div>
+                  {rl.map((r,i)=>(
+                    <div key={i} style={{fontSize:12,color:C.textDim,padding:'4px 0',borderBottom:i<rl.length-1?'1px solid '+C.border:'none',display:'flex',justifyContent:'space-between'}}>
+                      <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',flex:1,fontFamily:'Barlow Condensed'}}>{r.name}</span>
+                      <span style={{color:C.textMuted,fontFamily:'DM Mono',marginLeft:4,flexShrink:0}}>{(RT.find(t=>t.id===r.type)||{unit:''}).unit}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* INDEX DRAWER */}
+        {showIndex&&pins.length>0&&(
+          <div onClick={()=>setShowIndex(false)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',zIndex:260,display:'flex',justifyContent:'flex-end'}}>
+            <div onClick={e=>e.stopPropagation()} style={{background:C.card,width:'82%',maxWidth:340,height:'100%',display:'flex',flexDirection:'column',boxShadow:'-10px 0 40px rgba(0,0,0,0.2)'}}>
+              <div style={{padding:'14px 18px',background:C.navyDark,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                <span style={{fontSize:13,color:'#f1f5f9',fontFamily:'Barlow Condensed',fontWeight:700,letterSpacing:1.5}}>PIN INDEX · {pins.length}</span>
+                <button onClick={()=>setShowIndex(false)} style={{background:'none',border:'none',color:'#64748b',fontSize:24,cursor:'pointer',padding:'0 6px',minWidth:36,minHeight:36}}>×</button>
+              </div>
+              <div style={{flex:1,overflowY:'auto'}}>
+                {pins.map(p=>{const sc=SC[p.status]||C.textMuted;return(
+                  <div key={p.id} onClick={()=>{if(mode!=='delete-pin'){onPin(p.id);setShowIndex(false);}}} style={{padding:'14px 18px',borderBottom:'1px solid '+C.border,cursor:'pointer',background:selPin===p.id?C.blueDim:C.card}}>
+                    <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:4}}>
+                      <div style={{background:pCol(p),borderRadius:'50%',width:26,height:26,display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:700,color:'#fff',flexShrink:0,fontFamily:'DM Mono'}}>{p.id}</div>
+                      <span style={{fontSize:14,fontWeight:600,color:C.navyDark,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',flex:1,fontFamily:'Barlow Condensed'}}>{p.repairName||'Unnamed'}</span>
+                    </div>
+                    <div style={{paddingLeft:36,display:'flex',gap:6,alignItems:'center'}}>
+                      <div style={{width:7,height:7,borderRadius:'50%',background:sc,flexShrink:0}}/>
+                      <span style={{fontSize:10,fontWeight:700,color:sc,fontFamily:'Barlow Condensed'}}>{SL[p.status]||'new'}</span>
+                      <span style={{fontSize:10,color:C.textMuted,fontFamily:'DM Mono'}}>· {getMeas(p)}</span>
+                    </div>
+                  </div>
+                );})}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {modal&&<PinModal pin={modal} repairList={rl} onSave={savePin} onTrash={trashPin} onClose={()=>{setModal(null);setSelPin(null);}} onAddRT={addRT} isMobile={isMobile}/>}
+        {showT&&<SummaryTable project={project} onClose={()=>setShowT(false)}/>}
+        {showTrash&&<TrashPanel project={project} onRestore={restorePin} onClose={()=>setShowTrash(false)}/>}
+        {toast&&<Toast msg={toast}/>}
+      </div>
+    );
+  }
+
+  // ─── DESKTOP LAYOUT ────────────────────────────────────────────────────────
   return(
-    <div style={{display:'flex',height:'100vh',background:C.bg,overflow:'hidden',userSelect:'none'}}>
+    <div style={{display:'flex',height:'100%',background:C.bg,overflow:'hidden',userSelect:'none'}}>
       {/* LEFT */}
       <div style={{width:200,background:C.surface,borderRight:'1px solid '+C.border,display:'flex',flexDirection:'column',flexShrink:0}}>
         <div style={{background:C.navyDark,padding:'0 14px',height:56,display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
@@ -1390,8 +1719,8 @@ function App(){
             );
           })}
         </div>
-        <div style={{flex:1,position:'relative',overflow:'hidden',cursor:mode==='pin'||mode==='move-pin'?'crosshair':mode==='delete-pin'?'not-allowed':drag?'grabbing':'grab',background:'#d8dce4'}}
-          ref={cRef} onWheel={onWheel} onMouseDown={onMD} onMouseMove={onMM} onMouseUp={onMU} onClick={onCanvas}>
+        <div style={{flex:1,position:'relative',overflow:'hidden',cursor:mode==='pin'||mode==='move-pin'?'crosshair':mode==='delete-pin'?'not-allowed':'grab',background:'#d8dce4'}}
+          ref={cRef} onWheel={onWheel} onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp} onClick={onCanvasClick}>
           {!el?.img?(
             <>
               <div style={{position:'absolute',inset:0,backgroundImage:'linear-gradient('+C.border+' 1px,transparent 1px),linear-gradient(90deg,'+C.border+' 1px,transparent 1px)',backgroundSize:'32px 32px',pointerEvents:'none',opacity:0.8}}/>
@@ -1441,7 +1770,7 @@ function App(){
         </div>
       )}
 
-      {modal&&<PinModal pin={modal} repairList={rl} onSave={savePin} onTrash={trashPin} onClose={()=>{setModal(null);setSelPin(null);}} onAddRT={addRT}/>}
+      {modal&&<PinModal pin={modal} repairList={rl} onSave={savePin} onTrash={trashPin} onClose={()=>{setModal(null);setSelPin(null);}} onAddRT={addRT} isMobile={false}/>}
       {showT&&<SummaryTable project={project} onClose={()=>setShowT(false)}/>}
       {showTrash&&<TrashPanel project={project} onRestore={restorePin} onClose={()=>setShowTrash(false)}/>}
       {toast&&<Toast msg={toast}/>}
