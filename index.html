@@ -258,10 +258,10 @@ const TEST_USERS=[
   {name:'Lionel Melo',company:'Altitude Access',initials:'LM'},
   {name:'John Smith',company:'Altitude Access',initials:'JS'},
 ];
-function RoleSwitcher({user,onSwitch,onSwitchUser,onClose}){
+function RoleSwitcher({user,onSwitch,onSwitchUser,onLogout,onClose}){
   return(
     <div onClick={onClose} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
-      <div onClick={e=>e.stopPropagation()} style={{background:C.card,border:'1px solid '+C.border,borderRadius:14,padding:24,width:380,maxWidth:'95vw',boxShadow:'0 20px 60px rgba(0,0,0,0.2)'}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:C.card,border:'1px solid '+C.border,borderRadius:14,padding:24,width:380,maxWidth:'95vw',boxShadow:'0 20px 60px rgba(0,0,0,0.2)',maxHeight:'90vh',overflowY:'auto'}}>
         <div style={{fontFamily:'Barlow Condensed',fontSize:20,fontWeight:800,color:C.navyDark,marginBottom:4}}>Settings</div>
         <div style={{fontSize:12,color:C.textDim,marginBottom:16}}>{user.name} · {user.company}</div>
 
@@ -292,14 +292,18 @@ function RoleSwitcher({user,onSwitch,onSwitchUser,onClose}){
             );
           })}
         </div>
-        <button onClick={onClose} style={{width:'100%',padding:'10px',borderRadius:8,border:'1px solid '+C.border,background:'transparent',color:C.textDim,fontSize:13,cursor:'pointer',marginTop:12}}>Close</button>
+        <div style={{borderTop:'1px solid '+C.border,marginTop:16,paddingTop:12}}>
+          <button onClick={onLogout} style={{width:'100%',padding:'10px',borderRadius:8,border:'1px solid #dc262644',background:'#dc262608',color:'#dc2626',fontSize:13,fontWeight:700,cursor:'pointer',fontFamily:'Barlow Condensed',letterSpacing:0.5}}>↩ LOG OUT / SWITCH COMPANY</button>
+          <div style={{fontSize:10,color:C.textMuted,textAlign:'center',marginTop:6}}>Returns to the Welcome screen to change name, company, or role</div>
+        </div>
+        <button onClick={onClose} style={{width:'100%',padding:'10px',borderRadius:8,border:'1px solid '+C.border,background:'transparent',color:C.textDim,fontSize:13,cursor:'pointer',marginTop:10}}>Close</button>
       </div>
     </div>
   );
 }
 
 // ── HOME ──────────────────────────────────────────────────────────────────────
-function HomeScreen({onOpen,onCreate,user,onRoleSwitch,onSwitchUser}){
+function HomeScreen({onOpen,onCreate,user,onRoleSwitch,onSwitchUser,onLogout}){
   const [list,setList]=useState([]);const [loading,setLoading]=useState(true);const [showRole,setShowRole]=useState(false);
   useEffect(()=>{dbGetAll().then(all=>{setList(all.sort((a,b)=>b.createdAt>a.createdAt?1:-1));setLoading(false);});},[]);
   const del=async id=>{if(!confirm('Delete this project?'))return;await dbDelete(id);setList(l=>l.filter(p=>p.id!==id));};
@@ -350,7 +354,7 @@ function HomeScreen({onOpen,onCreate,user,onRoleSwitch,onSwitchUser}){
           {canCreate&&<button onClick={onCreate} style={{width:'100%',padding:'13px',background:C.navyDark,border:'none',borderRadius:10,color:'#fff',fontSize:15,fontWeight:700,cursor:'pointer',fontFamily:'Barlow Condensed',letterSpacing:1,marginTop:4}}>+ NEW PROJECT</button>}
         </div>
       </div>
-      {showRole&&<RoleSwitcher user={user} onSwitch={r=>{onRoleSwitch(r);setShowRole(false);}} onSwitchUser={u=>{onSwitchUser(u);setShowRole(false);}} onClose={()=>setShowRole(false)}/>}
+      {showRole&&<RoleSwitcher user={user} onSwitch={r=>{onRoleSwitch(r);setShowRole(false);}} onSwitchUser={u=>{onSwitchUser(u);setShowRole(false);}} onLogout={onLogout} onClose={()=>setShowRole(false)}/>}
     </div>
   );
 }
@@ -1121,6 +1125,7 @@ function App(){
   const saveUser=u=>{setUser(u);localStorage.setItem(SKEY_USER,JSON.stringify(u));};
   const switchRole=r=>{const nu={...user,role:r};saveUser(nu);};
   const switchUser=u=>{const nu={...user,name:u.name,company:u.company};saveUser(nu);};
+  const logout=()=>{localStorage.removeItem(SKEY_USER);setUser(null);setScreen('home');setProject(null);};
 
   if(!user)return<UserSetup onDone={u=>saveUser(u)}/>;
 
@@ -1235,7 +1240,7 @@ function App(){
     showToast('✗ Pin #'+pinId+' declined');
   };
 
-  if(screen==='home')return<HomeScreen onOpen={openProject} onCreate={()=>setScreen('setup')} user={user} onRoleSwitch={switchRole} onSwitchUser={switchUser}/>;
+  if(screen==='home')return<HomeScreen onOpen={openProject} onCreate={()=>setScreen('setup')} user={user} onRoleSwitch={switchRole} onSwitchUser={switchUser} onLogout={logout}/>;
   if(screen==='setup')return<Setup onDone={createProject} onBack={()=>setScreen('home')}/>;
 
   const pins=el?.pins||[];
@@ -1381,7 +1386,7 @@ function App(){
         {showT&&<SummaryTable project={project} onClose={()=>setShowT(false)} user={user}/>}
         {showTrash&&<TrashPanel project={project} onRestore={restorePin} onClose={()=>setShowTrash(false)}/>}
         {showReview&&<SurveyReview project={project} user={user} onApprove={approvePin} onDecline={declinePin} onClose={()=>setShowReview(false)}/>}
-        {showRole&&<RoleSwitcher user={user} onSwitch={r=>{switchRole(r);setShowRole(false);}} onSwitchUser={u=>{switchUser(u);setShowRole(false);}} onClose={()=>setShowRole(false)}/>}
+        {showRole&&<RoleSwitcher user={user} onSwitch={r=>{switchRole(r);setShowRole(false);}} onSwitchUser={u=>{switchUser(u);setShowRole(false);}} onLogout={logout} onClose={()=>setShowRole(false)}/>}
         {toast&&<Toast msg={toast}/>}
       </div>
     );
@@ -1517,7 +1522,7 @@ function App(){
       {showT&&<SummaryTable project={project} onClose={()=>setShowT(false)} user={user}/>}
       {showTrash&&<TrashPanel project={project} onRestore={restorePin} onClose={()=>setShowTrash(false)}/>}
       {showReview&&<SurveyReview project={project} user={user} onApprove={approvePin} onDecline={declinePin} onClose={()=>setShowReview(false)}/>}
-      {showRole&&<RoleSwitcher user={user} onSwitch={r=>{switchRole(r);setShowRole(false);}} onSwitchUser={u=>{switchUser(u);setShowRole(false);}} onClose={()=>setShowRole(false)}/>}
+      {showRole&&<RoleSwitcher user={user} onSwitch={r=>{switchRole(r);setShowRole(false);}} onSwitchUser={u=>{switchUser(u);setShowRole(false);}} onLogout={logout} onClose={()=>setShowRole(false)}/>}
       {toast&&<Toast msg={toast}/>}
     </div>
   );
