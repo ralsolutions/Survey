@@ -499,12 +499,16 @@ function PhotoNav({photos,initIdx=0,onClose}){
 // ── PIN MODAL ─────────────────────────────────────────────────────────────────
 function PinModal({pin,repairList,onSave,onTrash,onDuplicate,onClose,onAddRT,isMobile,user}){
   const isNew=!pin.repairName;
+  const isDup=pin._justDuplicated===true;
   const isClient=user.role==='client';
-  const [view,setView]=useState(isNew?(repairList.length>0?'choose':'new'):'status');
+  // New pins go to 'choose' or 'new'; duplicates jump straight to 'fill' with data carried over; existing pins open at status
+  const [view,setView]=useState(isNew?(repairList.length>0?'choose':'new'):(isDup?'fill':'status'));
   const [selR,setSelR]=useState(repairList.find(r=>r.name===pin.repairName)||null);
-  const [newName,setNewName]=useState('');const [rtype,setRtype]=useState('linear');
+  const [newName,setNewName]=useState(isDup?(pin.repairName||''):'');
+  const [rtype,setRtype]=useState(isDup?(pin.repairType||'linear'):'linear');
   const [meas,setMeas]=useState(()=>({...(pin.measurements||{})}));
-  const [comment,setComment]=useState('');const [hazard,setHazard]=useState(pin.hazard||'yellow');
+  const [comment,setComment]=useState(isDup?(pin.comment||''):'');
+  const [hazard,setHazard]=useState(pin.hazard||'yellow');
   const [staging,setStaging]=useState([]);const [saving,setSaving]=useState(false);
   const [photoNav,setPhotoNav]=useState(null);const [drawingMode,setDrawingMode]=useState(null);
   const [origMeas,setOrigMeas]=useState(null);
@@ -535,7 +539,9 @@ function PinModal({pin,repairList,onSave,onTrash,onDuplicate,onClose,onAddRT,isM
     setSaving(true);
     const rn=selR?selR.name:newName;
     if(!selR)onAddRT({name:rn,type:ert});
-    const pinData={...pin,repairName:rn,repairType:ert,measurements:{...meas},createdBy:user.name};
+    // Strip the _justDuplicated marker so it doesn't persist on the saved pin
+    const {_justDuplicated,...pinClean}=pin;
+    const pinData={...pinClean,repairName:rn,repairType:ert,measurements:{...meas},createdBy:user.name};
     const tagged=await Promise.all(staging.map(p=>wm(p,pinData,user.name)));
     onSave({...pinData,comment,hazard,status:ST.TOREPAIR,approval:'pending',surveyPhotos:tagged,fixingPhotos:[],donePhotos:[]});
     setSaving(false);
@@ -1284,7 +1290,7 @@ function App(){
     if(dup!==null&&canPin){
       const source=el?.pins.find(p=>p.id===dup);
       if(!source){setDupFromId(null);return;}
-      // Carry everything over EXCEPT photos and status/approval — photos are location-specific
+      // Carry everything over EXCEPT photos — photos are location-specific and must be retaken
       const clone={
         ...source,
         id:nid,
@@ -1298,6 +1304,7 @@ function App(){
         surveyPhotos:[],
         fixingPhotos:[],
         donePhotos:[],
+        _justDuplicated:true, // flag so the modal opens in the survey-photo-taking view
       };
       const elevIdx=ae;
       const newId=nid;
@@ -1305,7 +1312,7 @@ function App(){
       setNid(n=>n+1);
       setDupFromId(null);
       setModal(clone);
-      showToast('⎘ Duplicated as pin #'+newId+' — add photos');
+      showToast('⎘ Duplicated as pin #'+newId+' — add new survey photos');
       pushUndo(()=>{
         upd(elevIdx,el=>({...el,pins:el.pins.filter(pi=>pi.id!==newId)}));
         showToast('↶ Undid duplicate #'+newId);
@@ -1616,7 +1623,7 @@ function App(){
           </div>
         )}
 
-        {modal&&<PinModal pin={modal} repairList={rl} onSave={savePin} onTrash={trashPin} onDuplicate={duplicatePin} onClose={()=>{setModal(null);setSelPin(null);}} onAddRT={addRT} isMobile={isMobile} user={user}/>}
+        {modal&&<PinModal key={modal.id+"-"+(modal._justDuplicated?"d":"s")} pin={modal} repairList={rl} onSave={savePin} onTrash={trashPin} onDuplicate={duplicatePin} onClose={()=>{setModal(null);setSelPin(null);}} onAddRT={addRT} isMobile={isMobile} user={user}/>}
         {showT&&<SummaryTable project={project} onClose={()=>setShowT(false)} user={user}/>}
         {showTrash&&<TrashPanel project={project} onRestore={restorePin} onClose={()=>setShowTrash(false)}/>}
         {showReview&&<SurveyReview project={project} user={user} onApprove={approvePin} onDecline={declinePin} onClose={()=>setShowReview(false)}/>}
@@ -1768,7 +1775,7 @@ function App(){
         </div>
       )}
 
-      {modal&&<PinModal pin={modal} repairList={rl} onSave={savePin} onTrash={trashPin} onDuplicate={duplicatePin} onClose={()=>{setModal(null);setSelPin(null);}} onAddRT={addRT} isMobile={false} user={user}/>}
+      {modal&&<PinModal key={modal.id+"-"+(modal._justDuplicated?"d":"s")} pin={modal} repairList={rl} onSave={savePin} onTrash={trashPin} onDuplicate={duplicatePin} onClose={()=>{setModal(null);setSelPin(null);}} onAddRT={addRT} isMobile={false} user={user}/>}
       {showT&&<SummaryTable project={project} onClose={()=>setShowT(false)} user={user}/>}
       {showTrash&&<TrashPanel project={project} onRestore={restorePin} onClose={()=>setShowTrash(false)}/>}
       {showReview&&<SurveyReview project={project} user={user} onApprove={approvePin} onDecline={declinePin} onClose={()=>setShowReview(false)}/>}
