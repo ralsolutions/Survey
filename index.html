@@ -27,9 +27,27 @@ button{touch-action:manipulation;}
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const {useState,useRef,useEffect,useCallback,useMemo}=React;
+const {useState,useRef,useEffect,useCallback,useMemo,memo}=React;
 
 const SKEY_USER='ral-qs-user-v7';
+const APP_VERSION='v8';
+
+// Debounce utility for persistence
+function useDebouncedCallback(fn,delay){
+  const fnRef=useRef(fn);
+  const timerRef=useRef(null);
+  useEffect(()=>{fnRef.current=fn;},[fn]);
+  const call=useCallback((...args)=>{
+    if(timerRef.current)clearTimeout(timerRef.current);
+    timerRef.current=setTimeout(()=>{fnRef.current(...args);timerRef.current=null;},delay);
+  },[delay]);
+  const flush=useCallback((...args)=>{
+    if(timerRef.current){clearTimeout(timerRef.current);timerRef.current=null;}
+    fnRef.current(...args);
+  },[]);
+  useEffect(()=>()=>{if(timerRef.current)clearTimeout(timerRef.current);},[]);
+  return[call,flush];
+}
 
 const C={
   bg:'#e4e7ec',surface:'#f5f6f8',card:'#ffffff',
@@ -108,6 +126,38 @@ async function dbPut(project){const db=await openDB();return new Promise((res,re
 async function dbDelete(id){const db=await openDB();return new Promise((res,rej)=>{const tx=db.transaction(STORE,'readwrite');const req=tx.objectStore(STORE).delete(id);req.onsuccess=()=>res();req.onerror=e=>rej(e.target.error);});}
 async function dbGetPrices(projectId){const db=await openDB();return new Promise(res=>{const tx=db.transaction(PRICE_STORE,'readonly');const req=tx.objectStore(PRICE_STORE).get(projectId);req.onsuccess=e=>res(e.target.result?e.target.result.prices:{});req.onerror=()=>res({});});}
 async function dbSavePrices(projectId,prices){const db=await openDB();return new Promise(res=>{const tx=db.transaction(PRICE_STORE,'readwrite');tx.objectStore(PRICE_STORE).put({id:projectId,prices});tx.oncomplete=()=>res();tx.onerror=()=>res();});}
+
+// ── JSON EXPORT / IMPORT ──────────────────────────────────────────────────────
+async function exportProject(project){
+  const prices=await dbGetPrices(project.id).catch(()=>({}));
+  const bundle={
+    _type:'ral-quicksurvey-export',
+    _version:1,
+    _exportedAt:new Date().toISOString(),
+    project,
+    prices
+  };
+  const json=JSON.stringify(bundle,null,2);
+  const blob=new Blob([json],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  a.download='quicksurvey-'+(project.name||'project').replace(/[^a-z0-9]+/gi,'-').toLowerCase()+'-'+new Date().toISOString().slice(0,10)+'.json';
+  document.body.appendChild(a);a.click();
+  setTimeout(()=>{document.body.removeChild(a);URL.revokeObjectURL(url);},100);
+}
+async function importProjectFromFile(file){
+  const text=await file.text();
+  const bundle=JSON.parse(text);
+  if(bundle._type!=='ral-quicksurvey-export'||!bundle.project)throw new Error('Invalid Quick Survey export file');
+  const p=bundle.project;
+  // Assign new ID to avoid collision, keep original in _importedFrom
+  const newId=Date.now().toString();
+  const imported={...p,id:newId,_importedFrom:p.id,_importedAt:new Date().toISOString(),name:p.name+' (imported)'};
+  await dbPut(imported);
+  if(bundle.prices&&Object.keys(bundle.prices).length>0)await dbSavePrices(newId,bundle.prices);
+  return imported;
+}
 
 // ── COMPRESS ──────────────────────────────────────────────────────────────────
 async function compress(dataUrl,maxW=900,quality=0.5){
@@ -305,8 +355,20 @@ function RoleSwitcher({user,onSwitch,onSwitchUser,onLogout,onClose}){
 // ── HOME ──────────────────────────────────────────────────────────────────────
 function HomeScreen({onOpen,onCreate,user,onRoleSwitch,onSwitchUser,onLogout}){
   const [list,setList]=useState([]);const [loading,setLoading]=useState(true);const [showRole,setShowRole]=useState(false);
+  const fileInputRef=useRef(null);
   useEffect(()=>{dbGetAll().then(all=>{setList(all.sort((a,b)=>b.createdAt>a.createdAt?1:-1));setLoading(false);});},[]);
   const del=async id=>{if(!confirm('Delete this project?'))return;await dbDelete(id);setList(l=>l.filter(p=>p.id!==id));};
+  const handleExport=async(e,p)=>{e.stopPropagation();try{await exportProject(p);}catch(err){alert('Export failed: '+err.message);}};
+  const handleImport=async(e)=>{
+    const f=e.target.files[0];if(!f)return;
+    try{
+      const imported=await importProjectFromFile(f);
+      const all=await dbGetAll();
+      setList(all.sort((a,b)=>b.createdAt>a.createdAt?1:-1));
+      alert('✓ Imported "'+imported.name+'" successfully');
+    }catch(err){alert('Import failed: '+err.message);}
+    e.target.value='';
+  };
   const canCreate=user.role==='admin'||user.role==='manager';
   return(
     <div style={{height:'100vh',display:'flex',flexDirection:'column',background:C.bg}}>
@@ -347,11 +409,16 @@ function HomeScreen({onOpen,onCreate,user,onRoleSwitch,onSwitchUser,onLogout}){
                   </div>
                   {ptotal>0&&<div style={{marginTop:6,height:3,background:C.border,borderRadius:2,overflow:'hidden'}}><div style={{height:'100%',width:pct+'%',background:pct===100?C.done:C.blue,borderRadius:2}}/></div>}
                 </div>
+                <button title="Export project" style={{background:'none',border:'none',color:C.textMuted,cursor:'pointer',fontSize:13,padding:'4px 8px'}} onClick={e=>handleExport(e,p)}>⭳</button>
                 {canCreate&&<button style={{background:'none',border:'none',color:C.textMuted,cursor:'pointer',fontSize:15,padding:'4px 8px'}} onClick={e=>{e.stopPropagation();del(p.id);}}>🗑</button>}
               </div>
             );
           })}
-          {canCreate&&<button onClick={onCreate} style={{width:'100%',padding:'13px',background:C.navyDark,border:'none',borderRadius:10,color:'#fff',fontSize:15,fontWeight:700,cursor:'pointer',fontFamily:'Barlow Condensed',letterSpacing:1,marginTop:4}}>+ NEW PROJECT</button>}
+          <div style={{display:'flex',gap:8,marginTop:4}}>
+            {canCreate&&<button onClick={onCreate} style={{flex:1,padding:'13px',background:C.navyDark,border:'none',borderRadius:10,color:'#fff',fontSize:15,fontWeight:700,cursor:'pointer',fontFamily:'Barlow Condensed',letterSpacing:1}}>+ NEW PROJECT</button>}
+            {canCreate&&<button onClick={()=>fileInputRef.current?.click()} title="Import project from JSON" style={{padding:'13px 16px',background:'transparent',border:'1.5px solid '+C.border,borderRadius:10,color:C.textDim,fontSize:13,fontWeight:700,cursor:'pointer',fontFamily:'Barlow Condensed',letterSpacing:1,whiteSpace:'nowrap'}}>⭱ IMPORT</button>}
+            <input ref={fileInputRef} type="file" accept="application/json,.json" style={{display:'none'}} onChange={handleImport}/>
+          </div>
         </div>
       </div>
       {showRole&&<RoleSwitcher user={user} onSwitch={r=>{onRoleSwitch(r);setShowRole(false);}} onSwitchUser={u=>{onSwitchUser(u);setShowRole(false);}} onLogout={onLogout} onClose={()=>setShowRole(false)}/>}
@@ -1065,15 +1132,13 @@ function SummaryTable({project,onClose,user}){
 }
 
 // ── PIN MARKER ────────────────────────────────────────────────────────────────
-function Marker({pin,selected,isMoving,isDeleting,onClick,x,y,currentUser}){
+const Marker=memo(function Marker({pin,selected,isMoving,isDeleting,onClick,x,y,currentUser}){
   const isDeclined=pin.approval==='declined';
   const headColor=isDeclined?C.declined:pCol(pin,currentUser);
   const stemColor=isDeclined?C.declined:(SC[pin.status]||'#6b7280');
   const isOther=pin.createdBy&&pin.createdBy!==currentUser;
   const sz=isMoving||selected||isDeleting?28:22;
   const handle=e=>{e.stopPropagation();onClick(pin.id);};
-  // Pin visual: head(sz) + stem(10) + dot(7) = total ~39px. The dot is the anchor point.
-  // We position the outer div at (x,y) and offset so the dot sits exactly at that point.
   return(
     <div onClick={handle} onTouchEnd={e=>{e.stopPropagation();e.preventDefault();onClick(pin.id);}}
       style={{position:'absolute',left:x,top:y,transform:'translate(-50%, -100%)',cursor:isDeleting?'not-allowed':'pointer',zIndex:10,userSelect:'none',touchAction:'manipulation'}}>
@@ -1086,7 +1151,17 @@ function Marker({pin,selected,isMoving,isDeleting,onClick,x,y,currentUser}){
       </div>
     </div>
   );
-}
+},(prev,next)=>{
+  // Skip re-render when pin data and visual state haven't changed
+  return prev.pin===next.pin
+    &&prev.selected===next.selected
+    &&prev.isMoving===next.isMoving
+    &&prev.isDeleting===next.isDeleting
+    &&prev.x===next.x
+    &&prev.y===next.y
+    &&prev.currentUser===next.currentUser
+    &&prev.onClick===next.onClick;
+});
 
 function Toast({msg}){
   return<div style={{position:'fixed',bottom:60,left:'50%',transform:'translateX(-50%)',background:C.navyDark,border:'1px solid #1e3a5f',borderRadius:20,padding:'8px 20px',fontSize:12,color:'#e2e8f0',zIndex:500,pointerEvents:'none',boxShadow:'0 4px 20px rgba(0,0,0,0.2)'}}>{msg}</div>;
@@ -1108,19 +1183,48 @@ function App(){
   const [modal,setModal]=useState(null);
   const [nid,setNid]=useState(1);
   const [csz,setCsz]=useState({w:800,h:600});
+  const [imgDims,setImgDims]=useState({w:1,h:1}); // live image dimensions via ResizeObserver — no layout thrash on every render
   const [showT,setShowT]=useState(false);
   const [showTrash,setShowTrash]=useState(false);
   const [showMore,setShowMore]=useState(false);
   const [showIndex,setShowIndex]=useState(false);
   const [showReview,setShowReview]=useState(false);
   const [showRole,setShowRole]=useState(false);
+  const [indexSearch,setIndexSearch]=useState('');
   const [toast,setToast]=useState(null);
   const cRef=useRef(null);
   const iRef=useRef(null);
+  const undoStackRef=useRef([]); // stack of undo actions — last entry is most recent
 
   const gestureRef=useRef({panning:false,pinching:false,tapCandidate:false,moved:false,startX:0,startY:0,startPanX:0,startPanY:0,startDist:0,startZoom:1,startMidX:0,startMidY:0,tapPos:null});
 
-  useEffect(()=>{const obs=new ResizeObserver(entries=>{for(const e of entries)setCsz({w:e.contentRect.width,h:e.contentRect.height});});if(cRef.current)obs.observe(cRef.current);return()=>obs.disconnect();},[]);
+  // Canvas ResizeObserver
+  useEffect(()=>{
+    const obs=new ResizeObserver(entries=>{for(const e of entries)setCsz({w:e.contentRect.width,h:e.contentRect.height});});
+    if(cRef.current)obs.observe(cRef.current);
+    return()=>obs.disconnect();
+  },[]);
+
+  // Image ResizeObserver — updates only when image actually resizes, not on every render
+  useEffect(()=>{
+    const img=iRef.current;
+    if(!img)return;
+    const update=()=>setImgDims({w:img.offsetWidth||1,h:img.offsetHeight||1});
+    update();
+    const obs=new ResizeObserver(update);
+    obs.observe(img);
+    return()=>obs.disconnect();
+  },[project,ae,screen]);
+
+  // Debounced persistence — 400ms idle before hitting IndexedDB
+  const [persistDebounced,persistFlush]=useDebouncedCallback((p)=>{dbPut(p).catch(e=>console.error('persist failed',e));},400);
+
+  // Flush pending writes before page unload
+  useEffect(()=>{
+    const h=()=>{persistFlush && persistFlush();};
+    window.addEventListener('beforeunload',h);
+    return()=>window.removeEventListener('beforeunload',h);
+  },[persistFlush]);
 
   const saveUser=u=>{setUser(u);localStorage.setItem(SKEY_USER,JSON.stringify(u));};
   const switchRole=r=>{const nu={...user,role:r};saveUser(nu);};
@@ -1130,11 +1234,13 @@ function App(){
   if(!user)return<UserSetup onDone={u=>saveUser(u)}/>;
 
   const showToast=msg=>{setToast(msg);setTimeout(()=>setToast(null),2200);};
-  const persist=async p=>{await dbPut(p);};
-  const openProject=p=>{setProject(p);setRl(p.repairList||[]);const maxId=p.elevations.flatMap(e=>[...(e.pins||[]),...(e.trash||[])]).reduce((m,pi)=>Math.max(m,pi.id),0);setNid(maxId+1);setAe(0);setMode('pan');setScreen('survey');};
-  const createProject=(name,names)=>{const p={id:Date.now().toString(),name,createdAt:new Date().toISOString(),user:user.name,company:user.company,repairList:[],elevations:names.map(n=>({name:n,img:null,pins:[],trash:[]}))};persist(p);openProject(p);};
+  const persist=p=>persistDebounced(p);
+  const persistNow=p=>{persistFlush(p);}; // for immediate writes like project creation
+  const openProject=p=>{setProject(p);setRl(p.repairList||[]);const maxId=p.elevations.flatMap(e=>[...(e.pins||[]),...(e.trash||[])]).reduce((m,pi)=>Math.max(m,pi.id),0);setNid(maxId+1);setAe(0);setMode('pan');setScreen('survey');undoStackRef.current=[];};
+  const createProject=(name,names)=>{const p={id:Date.now().toString(),name,createdAt:new Date().toISOString(),user:user.name,company:user.company,repairList:[],elevations:names.map(n=>({name:n,img:null,pins:[],trash:[]}))};persistNow(p);openProject(p);};
 
   const el=project?.elevations[ae];
+  // Elevation updater — updates React state immediately, persists with debounce
   const upd=(i,fn)=>{setProject(p=>{const e=[...p.elevations];e[i]=fn(e[i]);const np={...p,elevations:e};persist(np);return np;});};
   const onPhoto=e=>{const f=e.target.files[0];if(!f)return;const fr=new FileReader();fr.onload=async ev=>{const b64=await compress(ev.target.result,1600,0.7);upd(ae,el=>({...el,img:b64}));setZoom(1);setPan({x:0,y:0});};fr.readAsDataURL(f);};
 
@@ -1142,9 +1248,18 @@ function App(){
   const canEdit=!isClient;
   const canPin=canEdit;
 
+  // Push an undo action — cap stack at 20
+  const pushUndo=(action)=>{
+    undoStackRef.current.push(action);
+    if(undoStackRef.current.length>20)undoStackRef.current.shift();
+  };
+  const undo=()=>{
+    const action=undoStackRef.current.pop();
+    if(!action){showToast('Nothing to undo');return;}
+    action();
+  };
+
   // ── Move pin: improved two-step ──
-  // Step 1: mode is 'move-pin', movId is null → tap a pin to select it
-  // Step 2: movId is set → tap canvas to place it there
   const modeRef=useRef(mode);useEffect(()=>{modeRef.current=mode;},[mode]);
   const movIdRef=useRef(movId);useEffect(()=>{movIdRef.current=movId;},[movId]);
 
@@ -1162,11 +1277,27 @@ function App(){
     const mv=movIdRef.current;
     if(m==='pin'&&canPin){
       const p={id:nid,x:coords.x,y:coords.y,repairName:'',repairType:'linear',measurements:{},comment:'',hazard:'yellow',status:ST.TOREPAIR,approval:'pending',createdBy:user.name,surveyPhotos:[],fixingPhotos:[],donePhotos:[]};
-      upd(ae,el=>({...el,pins:[...el.pins,p]}));setNid(n=>n+1);setModal(p);
+      const elevIdx=ae;
+      const newId=nid;
+      upd(elevIdx,el=>({...el,pins:[...el.pins,p]}));setNid(n=>n+1);setModal(p);
+      pushUndo(()=>{
+        upd(elevIdx,el=>({...el,pins:el.pins.filter(pi=>pi.id!==newId)}));
+        showToast('↶ Undid pin #'+newId);
+      });
     }else if(m==='move-pin'&&mv){
-      upd(ae,el=>({...el,pins:el.pins.map(p=>p.id===mv?{...p,...coords}:p)}));
+      // Capture previous position for undo
+      const prevPin=el?.pins.find(p=>p.id===mv);
+      const prevPos=prevPin?{x:prevPin.x,y:prevPin.y}:null;
+      const elevIdx=ae;const movedId=mv;
+      upd(elevIdx,el=>({...el,pins:el.pins.map(p=>p.id===movedId?{...p,...coords}:p)}));
       setMovId(null);
-      showToast('✓ Pin #'+mv+' repositioned');
+      showToast('✓ Pin #'+movedId+' repositioned');
+      if(prevPos){
+        pushUndo(()=>{
+          upd(elevIdx,el=>({...el,pins:el.pins.map(p=>p.id===movedId?{...p,...prevPos}:p)}));
+          showToast('↶ Undid move of pin #'+movedId);
+        });
+      }
     }
   };
 
@@ -1179,6 +1310,30 @@ function App(){
     if(mouseDragRef.current.sx!==undefined){const moved=Math.abs(e.clientX-mouseDragRef.current.sx)>3||Math.abs(e.clientY-mouseDragRef.current.sy)>3;if(moved){mouseDragRef.current.sx=undefined;return;}}
     const coords=clickCoords(e);if(coords)placeOrHandleCoords(coords);
   };
+
+  // Keyboard shortcuts (desktop only — skip when typing in inputs or when any modal is open)
+  useEffect(()=>{
+    if(isMobile)return;
+    const handler=e=>{
+      const tag=(e.target.tagName||'').toLowerCase();
+      if(tag==='input'||tag==='textarea'||tag==='select'||e.target.isContentEditable)return;
+      if(modal||showT||showTrash||showReview||showRole||showMore||showIndex)return;
+      // Ctrl+Z / Cmd+Z = undo
+      if((e.ctrlKey||e.metaKey)&&!e.shiftKey&&e.key.toLowerCase()==='z'){e.preventDefault();undo();return;}
+      // Single-letter shortcuts
+      if(e.ctrlKey||e.metaKey||e.altKey)return;
+      const k=e.key.toLowerCase();
+      if(k==='p'&&canPin){e.preventDefault();setMode('pin');setMovId(null);}
+      else if(k==='m'&&canEdit){e.preventDefault();setMode('move-pin');}
+      else if(k==='d'&&canEdit){e.preventDefault();setMode('delete-pin');setMovId(null);}
+      else if(k==='v'||k==='h'){e.preventDefault();setMode('pan');setMovId(null);}
+      else if(k==='escape'){e.preventDefault();setMode('pan');setMovId(null);setSelPin(null);}
+      else if(k==='s'){e.preventDefault();setShowReview(true);}
+      else if(k==='r'){e.preventDefault();setZoom(1);setPan({x:0,y:0});}
+    };
+    window.addEventListener('keydown',handler);
+    return()=>window.removeEventListener('keydown',handler);
+  },[isMobile,canPin,canEdit,modal,showT,showTrash,showReview,showRole,showMore,showIndex]);
 
   // Touch handlers
   useEffect(()=>{
@@ -1207,45 +1362,59 @@ function App(){
 
   const onPin=id=>{
     if(mode==='move-pin'){
-      if(!movId){
-        // Step 1: select pin to move
-        setMovId(id);
-        showToast('Tap where to place pin #'+id);
-      }else{
-        // Already moving a pin, tapping another pin — switch to this one
-        setMovId(id);
-        showToast('Now moving pin #'+id);
-      }
+      if(!movId){setMovId(id);showToast('Tap where to place pin #'+id);}
+      else{setMovId(id);showToast('Now moving pin #'+id);}
       return;
     }
-    if(mode==='delete-pin'){const pin=el.pins.find(p=>p.id===id);const name=pin?pin.repairName||('Pin #'+id):'Pin #'+id;if(!confirm('Move "'+name+'" to trash?'))return;upd(ae,el=>{const pin=el.pins.find(p=>p.id===id);if(!pin)return el;return{...el,pins:el.pins.filter(p=>p.id!==id),trash:[...(el.trash||[]),{...pin,deletedAt:new Date().toISOString()}]};});setMode('pan');showToast('🗑 Pin #'+id+' moved to trash');return;}
+    if(mode==='delete-pin'){
+      const pin=el.pins.find(p=>p.id===id);const name=pin?pin.repairName||('Pin #'+id):'Pin #'+id;
+      if(!confirm('Move "'+name+'" to trash?'))return;
+      const elevIdx=ae;const pinCopy={...pin};
+      upd(elevIdx,el=>({...el,pins:el.pins.filter(p=>p.id!==id),trash:[...(el.trash||[]),{...pinCopy,deletedAt:new Date().toISOString()}]}));
+      setMode('pan');showToast('🗑 Pin #'+id+' moved to trash');
+      pushUndo(()=>{
+        upd(elevIdx,el=>({...el,pins:[...el.pins,pinCopy],trash:(el.trash||[]).filter(t=>t.id!==id)}));
+        showToast('↶ Restored pin #'+id);
+      });
+      return;
+    }
     setSelPin(id);const p=el.pins.find(p=>p.id===id);if(p)setModal({...p});
   };
   const savePin=u=>{upd(ae,el=>({...el,pins:el.pins.map(p=>p.id===u.id?u:p)}));setModal(null);setSelPin(null);};
-  const trashPin=id=>{upd(ae,el=>{const pin=el.pins.find(p=>p.id===id);if(!pin)return el;return{...el,pins:el.pins.filter(p=>p.id!==id),trash:[...(el.trash||[]),{...pin,deletedAt:new Date().toISOString()}]};});setModal(null);setSelPin(null);showToast('🗑 Pin #'+id+' moved to trash');};
+  const trashPin=id=>{
+    const pin=el.pins.find(p=>p.id===id);if(!pin)return;
+    const elevIdx=ae;const pinCopy={...pin};
+    upd(elevIdx,el=>({...el,pins:el.pins.filter(p=>p.id!==id),trash:[...(el.trash||[]),{...pinCopy,deletedAt:new Date().toISOString()}]}));
+    setModal(null);setSelPin(null);showToast('🗑 Pin #'+id+' moved to trash');
+    pushUndo(()=>{
+      upd(elevIdx,el=>({...el,pins:[...el.pins,pinCopy],trash:(el.trash||[]).filter(t=>t.id!==id)}));
+      showToast('↶ Restored pin #'+id);
+    });
+  };
   const restorePin=(elevIdx,pinId)=>{upd(elevIdx,el=>{const pin=(el.trash||[]).find(p=>p.id===pinId);if(!pin)return el;const{deletedAt,...r}=pin;return{...el,pins:[...el.pins,r],trash:(el.trash||[]).filter(p=>p.id!==pinId)};});showToast('✓ Pin restored');};
   const addRT=r=>{const nl=rl.find(x=>x.name===r.name)?rl:[...rl,r];setRl(nl);setProject(p=>{const np={...p,repairList:nl};persist(np);return np;});};
 
-  // Approval handlers
-  const approvePin=pinId=>{
-    project.elevations.forEach((el,ei)=>{
-      if(el.pins.some(p=>p.id===pinId)){upd(ei,el=>({...el,pins:el.pins.map(p=>p.id===pinId?{...p,approval:'approved'}:p)}));}
+  // Approval — single setProject pass instead of looping with multiple upd() calls
+  const updateApproval=(pinId,patch,msg)=>{
+    setProject(p=>{
+      const np={...p,elevations:p.elevations.map(el=>({
+        ...el,
+        pins:el.pins.map(pi=>pi.id===pinId?{...pi,...patch}:pi)
+      }))};
+      persist(np);
+      return np;
     });
-    showToast('✓ Pin #'+pinId+' approved');
+    showToast(msg);
   };
-  const declinePin=(pinId,comment)=>{
-    project.elevations.forEach((el,ei)=>{
-      if(el.pins.some(p=>p.id===pinId)){upd(ei,el=>({...el,pins:el.pins.map(p=>p.id===pinId?{...p,approval:'declined',approvalComment:comment||''}:p)}));}
-    });
-    showToast('✗ Pin #'+pinId+' declined');
-  };
+  const approvePin=pinId=>updateApproval(pinId,{approval:'approved'},'✓ Pin #'+pinId+' approved');
+  const declinePin=(pinId,comment)=>updateApproval(pinId,{approval:'declined',approvalComment:comment||''},'✗ Pin #'+pinId+' declined');
 
   if(screen==='home')return<HomeScreen onOpen={openProject} onCreate={()=>setScreen('setup')} user={user} onRoleSwitch={switchRole} onSwitchUser={switchUser} onLogout={logout}/>;
   if(screen==='setup')return<Setup onDone={createProject} onBack={()=>setScreen('home')}/>;
 
   const pins=el?.pins||[];
   const trashCount=project.elevations.reduce((s,e)=>s+(e.trash||[]).length,0);
-  const iW=iRef.current?.offsetWidth||1,iH=iRef.current?.offsetHeight||1;
+  const iW=imgDims.w,iH=imgDims.h;
   const total=project.elevations.reduce((s,e)=>s+(e.pins||[]).length,0);
   const hint=isClient?'👁 View only':(mode==='pin'?(isMobile?'📍 Tap to place a pin':'📍 Click to place a pin'):mode==='move-pin'?(movId?'Moving #'+movId+' — tap destination':'Tap a pin to select it'):mode==='delete-pin'?'🗑 Tap a pin to trash it':(isMobile?'✋ Drag to pan · pinch to zoom':'✋ Drag to pan · scroll to zoom'));
 
@@ -1362,21 +1531,37 @@ function App(){
                 <span style={{fontSize:13,color:'#f1f5f9',fontFamily:'Barlow Condensed',fontWeight:700,letterSpacing:1.5}}>PIN INDEX · {pins.length}</span>
                 <button onClick={()=>setShowIndex(false)} style={{background:'none',border:'none',color:'#64748b',fontSize:24,cursor:'pointer',padding:'0 6px',minWidth:36,minHeight:36}}>×</button>
               </div>
+              <div style={{padding:'10px 14px',background:C.surface,borderBottom:'1px solid '+C.border}}>
+                <input value={indexSearch} onChange={e=>setIndexSearch(e.target.value)} placeholder="🔍 Search name, type, status..."
+                  style={{...IS,padding:'8px 10px',fontSize:12}}/>
+              </div>
               <div style={{flex:1,overflowY:'auto'}}>
-                {pins.map(p=>{const isDecl=p.approval==='declined';const sc=isDecl?C.declined:(SC[p.status]||C.textMuted);return(
-                  <div key={p.id} onClick={()=>{if(mode!=='delete-pin'){onPin(p.id);setShowIndex(false);}}} style={{padding:'14px 18px',borderBottom:'1px solid '+C.border,cursor:'pointer',background:isDecl?'#fef2f2':(selPin===p.id?C.blueDim:C.card)}}>
-                    <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:4}}>
-                      <div style={{background:pCol(p,user.name),borderRadius:'50%',width:26,height:26,display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:700,color:'#fff',flexShrink:0,fontFamily:'DM Mono'}}>{p.id}</div>
-                      <span style={{fontSize:14,fontWeight:600,color:isDecl?C.declined:C.navyDark,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',flex:1,fontFamily:'Barlow Condensed'}}>{p.repairName||'Unnamed'}</span>
+                {(()=>{
+                  const q=indexSearch.trim().toLowerCase();
+                  const filtered=q?pins.filter(p=>{
+                    const name=(p.repairName||'').toLowerCase();
+                    const type=(RT.find(r=>r.id===p.repairType)||{label:''}).label.toLowerCase();
+                    const status=(p.approval==='declined'?'declined':(SL[p.status]||'')).toLowerCase();
+                    const hazard=(HAZARDS.find(h=>h.id===p.hazard)||{label:''}).label.toLowerCase();
+                    const by=(p.createdBy||'').toLowerCase();
+                    return name.includes(q)||type.includes(q)||status.includes(q)||hazard.includes(q)||by.includes(q)||String(p.id).includes(q);
+                  }):pins;
+                  if(filtered.length===0)return<div style={{padding:'24px',textAlign:'center',color:C.textMuted,fontSize:12}}>No pins match "{indexSearch}"</div>;
+                  return filtered.map(p=>{const isDecl=p.approval==='declined';const sc=isDecl?C.declined:(SC[p.status]||C.textMuted);return(
+                    <div key={p.id} onClick={()=>{if(mode!=='delete-pin'){onPin(p.id);setShowIndex(false);}}} style={{padding:'14px 18px',borderBottom:'1px solid '+C.border,cursor:'pointer',background:isDecl?'#fef2f2':(selPin===p.id?C.blueDim:C.card)}}>
+                      <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:4}}>
+                        <div style={{background:pCol(p,user.name),borderRadius:'50%',width:26,height:26,display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:700,color:'#fff',flexShrink:0,fontFamily:'DM Mono'}}>{p.id}</div>
+                        <span style={{fontSize:14,fontWeight:600,color:isDecl?C.declined:C.navyDark,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',flex:1,fontFamily:'Barlow Condensed'}}>{p.repairName||'Unnamed'}</span>
+                      </div>
+                      <div style={{paddingLeft:36,display:'flex',gap:6,alignItems:'center'}}>
+                        <div style={{width:7,height:7,borderRadius:'50%',background:sc,flexShrink:0}}/>
+                        <span style={{fontSize:10,fontWeight:700,color:sc,fontFamily:'Barlow Condensed'}}>{isDecl?'Declined':(SL[p.status]||'new')}</span>
+                        <span style={{fontSize:10,color:C.textMuted,fontFamily:'DM Mono'}}>· {getMeas(p)}</span>
+                        {p.createdBy&&p.createdBy!==user.name&&<span style={{fontSize:9,color:C.textMuted,marginLeft:'auto'}}>by {p.createdBy}</span>}
+                      </div>
                     </div>
-                    <div style={{paddingLeft:36,display:'flex',gap:6,alignItems:'center'}}>
-                      <div style={{width:7,height:7,borderRadius:'50%',background:sc,flexShrink:0}}/>
-                      <span style={{fontSize:10,fontWeight:700,color:sc,fontFamily:'Barlow Condensed'}}>{isDecl?'Declined':(SL[p.status]||'new')}</span>
-                      <span style={{fontSize:10,color:C.textMuted,fontFamily:'DM Mono'}}>· {getMeas(p)}</span>
-                      {p.createdBy&&p.createdBy!==user.name&&<span style={{fontSize:9,color:C.textMuted,marginLeft:'auto'}}>by {p.createdBy}</span>}
-                    </div>
-                  </div>
-                );})}
+                  );});
+                })()}
               </div>
             </div>
           </div>
@@ -1500,20 +1685,36 @@ function App(){
             <span style={{fontSize:9,color:'#475569',letterSpacing:2,fontFamily:'Barlow Condensed',fontWeight:700}}>INDEX</span>
             <span style={{fontSize:9,color:'#475569',fontFamily:'DM Mono'}}>{pins.length}</span>
           </div>
+          <div style={{padding:'6px 8px',background:C.card,borderBottom:'1px solid '+C.border}}>
+            <input value={indexSearch} onChange={e=>setIndexSearch(e.target.value)} placeholder="🔍 Search..."
+              style={{...IS,padding:'5px 8px',fontSize:11}}/>
+          </div>
           <div style={{flex:1,overflowY:'auto'}}>
-            {pins.map(p=>{const isDecl=p.approval==='declined';const sc=isDecl?C.declined:(SC[p.status]||C.textMuted);return(
-              <div key={p.id} onClick={()=>{if(mode!=='delete-pin')onPin(p.id);}} style={{padding:'9px 14px',borderBottom:'1px solid '+C.border,cursor:'pointer',background:isDecl?'#fef2f2':(selPin===p.id?C.blueDim:C.card),transition:'background 0.1s'}}>
-                <div style={{display:'flex',alignItems:'center',gap:7,marginBottom:3}}>
-                  <div style={{background:pCol(p,user.name),borderRadius:'50%',width:18,height:18,display:'flex',alignItems:'center',justifyContent:'center',fontSize:9,fontWeight:700,color:'#fff',flexShrink:0,fontFamily:'DM Mono'}}>{p.id}</div>
-                  <span style={{fontSize:12,fontWeight:600,color:isDecl?C.declined:C.navyDark,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',flex:1,fontFamily:'Barlow Condensed'}}>{p.repairName||'Unnamed'}</span>
+            {(()=>{
+              const q=indexSearch.trim().toLowerCase();
+              const filtered=q?pins.filter(p=>{
+                const name=(p.repairName||'').toLowerCase();
+                const type=(RT.find(r=>r.id===p.repairType)||{label:''}).label.toLowerCase();
+                const status=(p.approval==='declined'?'declined':(SL[p.status]||'')).toLowerCase();
+                const hazard=(HAZARDS.find(h=>h.id===p.hazard)||{label:''}).label.toLowerCase();
+                const by=(p.createdBy||'').toLowerCase();
+                return name.includes(q)||type.includes(q)||status.includes(q)||hazard.includes(q)||by.includes(q)||String(p.id).includes(q);
+              }):pins;
+              if(filtered.length===0)return<div style={{padding:'16px',textAlign:'center',color:C.textMuted,fontSize:11}}>No matches</div>;
+              return filtered.map(p=>{const isDecl=p.approval==='declined';const sc=isDecl?C.declined:(SC[p.status]||C.textMuted);return(
+                <div key={p.id} onClick={()=>{if(mode!=='delete-pin')onPin(p.id);}} style={{padding:'9px 14px',borderBottom:'1px solid '+C.border,cursor:'pointer',background:isDecl?'#fef2f2':(selPin===p.id?C.blueDim:C.card),transition:'background 0.1s'}}>
+                  <div style={{display:'flex',alignItems:'center',gap:7,marginBottom:3}}>
+                    <div style={{background:pCol(p,user.name),borderRadius:'50%',width:18,height:18,display:'flex',alignItems:'center',justifyContent:'center',fontSize:9,fontWeight:700,color:'#fff',flexShrink:0,fontFamily:'DM Mono'}}>{p.id}</div>
+                    <span style={{fontSize:12,fontWeight:600,color:isDecl?C.declined:C.navyDark,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',flex:1,fontFamily:'Barlow Condensed'}}>{p.repairName||'Unnamed'}</span>
+                  </div>
+                  <div style={{paddingLeft:25,display:'flex',gap:5,alignItems:'center'}}>
+                    <div style={{width:6,height:6,borderRadius:'50%',background:sc,flexShrink:0}}/>
+                    <span style={{fontSize:9,fontWeight:700,color:sc,fontFamily:'Barlow Condensed'}}>{isDecl?'Declined':(SL[p.status]||'new')}</span>
+                    {p.hazard&&<span style={{fontSize:9,color:HC[p.hazard],marginLeft:'auto'}}>●</span>}
+                  </div>
                 </div>
-                <div style={{paddingLeft:25,display:'flex',gap:5,alignItems:'center'}}>
-                  <div style={{width:6,height:6,borderRadius:'50%',background:sc,flexShrink:0}}/>
-                  <span style={{fontSize:9,fontWeight:700,color:sc,fontFamily:'Barlow Condensed'}}>{isDecl?'Declined':(SL[p.status]||'new')}</span>
-                  {p.hazard&&<span style={{fontSize:9,color:HC[p.hazard],marginLeft:'auto'}}>●</span>}
-                </div>
-              </div>
-            );})}
+              );});
+            })()}
           </div>
         </div>
       )}
