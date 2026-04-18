@@ -497,7 +497,7 @@ function PhotoNav({photos,initIdx=0,onClose}){
 }
 
 // ── PIN MODAL ─────────────────────────────────────────────────────────────────
-function PinModal({pin,repairList,onSave,onTrash,onClose,onAddRT,isMobile,user}){
+function PinModal({pin,repairList,onSave,onTrash,onDuplicate,onClose,onAddRT,isMobile,user}){
   const isNew=!pin.repairName;
   const isClient=user.role==='client';
   const [view,setView]=useState(isNew?(repairList.length>0?'choose':'new'):'status');
@@ -595,6 +595,7 @@ function PinModal({pin,repairList,onSave,onTrash,onClose,onAddRT,isMobile,user})
             {isDeclined&&<span style={{fontSize:9,fontWeight:700,padding:'2px 8px',borderRadius:10,background:'#dc262633',color:'#fca5a5',letterSpacing:1}}>✗ DECLINED</span>}
           </div>
           <div style={{display:'flex',gap:8,alignItems:'center'}}>
+            {!isNew&&!isClient&&<button onClick={()=>onDuplicate(pin.id)} title="Duplicate pin" style={{background:'none',border:'1px solid #2563eb40',borderRadius:6,color:'#93c5fd',cursor:'pointer',fontSize:11,padding:'3px 8px',fontFamily:'Barlow Condensed',fontWeight:700,letterSpacing:0.5}}>⎘ DUPLICATE</button>}
             {!isNew&&!isClient&&<button onClick={()=>onTrash(pin.id)} style={{background:'none',border:'1px solid #ef444430',borderRadius:6,color:'#ef444488',cursor:'pointer',fontSize:11,padding:'3px 8px'}}>🗑</button>}
             <button onClick={onClose} style={{background:'none',border:'none',color:'#64748b',fontSize:20,cursor:'pointer'}}>×</button>
           </div>
@@ -1177,6 +1178,7 @@ function App(){
   const [ae,setAe]=useState(0);
   const [mode,setMode]=useState('pan');
   const [movId,setMovId]=useState(null);
+  const [dupFromId,setDupFromId]=useState(null); // pin id to duplicate on next canvas tap
   const [zoom,setZoom]=useState(1);
   const [pan_,setPan]=useState({x:0,y:0});
   const [selPin,setSelPin]=useState(null);
@@ -1262,6 +1264,7 @@ function App(){
   // ── Move pin: improved two-step ──
   const modeRef=useRef(mode);useEffect(()=>{modeRef.current=mode;},[mode]);
   const movIdRef=useRef(movId);useEffect(()=>{movIdRef.current=movId;},[movId]);
+  const dupFromIdRef=useRef(dupFromId);useEffect(()=>{dupFromIdRef.current=dupFromId;},[dupFromId]);
 
   const clickCoords=e=>{
     if(el?.img){const img=iRef.current;if(!img)return null;const r=img.getBoundingClientRect();const x=(e.clientX-r.left)/r.width*100,y=(e.clientY-r.top)/r.height*100;if(x<0||x>100||y<0||y>100)return null;return{x,y};}
@@ -1275,6 +1278,41 @@ function App(){
   const placeOrHandleCoords=coords=>{
     const m=modeRef.current;
     const mv=movIdRef.current;
+    const dup=dupFromIdRef.current;
+
+    // Duplicate takes priority — if we're waiting to place a clone, next tap lands the clone
+    if(dup!==null&&canPin){
+      const source=el?.pins.find(p=>p.id===dup);
+      if(!source){setDupFromId(null);return;}
+      // Carry everything over EXCEPT photos and status/approval — photos are location-specific
+      const clone={
+        ...source,
+        id:nid,
+        x:coords.x,y:coords.y,
+        createdBy:user.name,
+        status:ST.TOREPAIR,
+        approval:'pending',
+        approvalComment:'',
+        fixingComment:'',
+        doneComment:'',
+        surveyPhotos:[],
+        fixingPhotos:[],
+        donePhotos:[],
+      };
+      const elevIdx=ae;
+      const newId=nid;
+      upd(elevIdx,el=>({...el,pins:[...el.pins,clone]}));
+      setNid(n=>n+1);
+      setDupFromId(null);
+      setModal(clone);
+      showToast('⎘ Duplicated as pin #'+newId+' — add photos');
+      pushUndo(()=>{
+        upd(elevIdx,el=>({...el,pins:el.pins.filter(pi=>pi.id!==newId)}));
+        showToast('↶ Undid duplicate #'+newId);
+      });
+      return;
+    }
+
     if(m==='pin'&&canPin){
       const p={id:nid,x:coords.x,y:coords.y,repairName:'',repairType:'linear',measurements:{},comment:'',hazard:'yellow',status:ST.TOREPAIR,approval:'pending',createdBy:user.name,surveyPhotos:[],fixingPhotos:[],donePhotos:[]};
       const elevIdx=ae;
@@ -1285,7 +1323,6 @@ function App(){
         showToast('↶ Undid pin #'+newId);
       });
     }else if(m==='move-pin'&&mv){
-      // Capture previous position for undo
       const prevPin=el?.pins.find(p=>p.id===mv);
       const prevPos=prevPin?{x:prevPin.x,y:prevPin.y}:null;
       const elevIdx=ae;const movedId=mv;
@@ -1327,7 +1364,7 @@ function App(){
       else if(k==='m'&&canEdit){e.preventDefault();setMode('move-pin');}
       else if(k==='d'&&canEdit){e.preventDefault();setMode('delete-pin');setMovId(null);}
       else if(k==='v'||k==='h'){e.preventDefault();setMode('pan');setMovId(null);}
-      else if(k==='escape'){e.preventDefault();setMode('pan');setMovId(null);setSelPin(null);}
+      else if(k==='escape'){e.preventDefault();setMode('pan');setMovId(null);setSelPin(null);setDupFromId(null);}
       else if(k==='s'){e.preventDefault();setShowReview(true);}
       else if(k==='r'){e.preventDefault();setZoom(1);setPan({x:0,y:0});}
     };
@@ -1361,6 +1398,12 @@ function App(){
   },[mode,pan_.x,pan_.y,zoom,el?.img,nid,movId,ae]);
 
   const onPin=id=>{
+    // If in duplicate mode, tapping a pin places clone right on top of that pin's position
+    if(dupFromId!==null){
+      const targetPin=el?.pins.find(p=>p.id===id);
+      if(targetPin){placeOrHandleCoords({x:targetPin.x+3,y:targetPin.y});}
+      return;
+    }
     if(mode==='move-pin'){
       if(!movId){setMovId(id);showToast('Tap where to place pin #'+id);}
       else{setMovId(id);showToast('Now moving pin #'+id);}
@@ -1381,6 +1424,12 @@ function App(){
     setSelPin(id);const p=el.pins.find(p=>p.id===id);if(p)setModal({...p});
   };
   const savePin=u=>{upd(ae,el=>({...el,pins:el.pins.map(p=>p.id===u.id?u:p)}));setModal(null);setSelPin(null);};
+  const duplicatePin=id=>{
+    setModal(null);setSelPin(null);
+    setDupFromId(id);
+    setMode('pan');setMovId(null);
+    showToast('⎘ Tap on the canvas to place a copy of pin #'+id);
+  };
   const trashPin=id=>{
     const pin=el.pins.find(p=>p.id===id);if(!pin)return;
     const elevIdx=ae;const pinCopy={...pin};
@@ -1416,7 +1465,7 @@ function App(){
   const trashCount=project.elevations.reduce((s,e)=>s+(e.trash||[]).length,0);
   const iW=imgDims.w,iH=imgDims.h;
   const total=project.elevations.reduce((s,e)=>s+(e.pins||[]).length,0);
-  const hint=isClient?'👁 View only':(mode==='pin'?(isMobile?'📍 Tap to place a pin':'📍 Click to place a pin'):mode==='move-pin'?(movId?'Moving #'+movId+' — tap destination':'Tap a pin to select it'):mode==='delete-pin'?'🗑 Tap a pin to trash it':(isMobile?'✋ Drag to pan · pinch to zoom':'✋ Drag to pan · scroll to zoom'));
+  const hint=isClient?'👁 View only':(dupFromId!==null?'⎘ Tap on the canvas to place a copy of pin #'+dupFromId:(mode==='pin'?(isMobile?'📍 Tap to place a pin':'📍 Click to place a pin'):mode==='move-pin'?(movId?'Moving #'+movId+' — tap destination':'Tap a pin to select it'):mode==='delete-pin'?'🗑 Tap a pin to trash it':(isMobile?'✋ Drag to pan · pinch to zoom':'✋ Drag to pan · scroll to zoom')));
 
   const modes=canEdit?[
     {id:'pan',i:'✋',l:'Pan / View'},
@@ -1444,7 +1493,7 @@ function App(){
           {project.elevations.map((e,i)=>{
             const ep=e.pins||[];const ed=ep.filter(p=>p.status===ST.DONE).length;
             return(
-              <button key={i} onClick={()=>{setAe(i);setMode('pan');setMovId(null);setSelPin(null);setZoom(1);setPan({x:0,y:0});}}
+              <button key={i} onClick={()=>{setAe(i);setMode("pan");setMovId(null);setDupFromId(null);setSelPin(null);setZoom(1);setPan({x:0,y:0});}}
                 style={{padding:'10px 14px',border:'none',borderBottom:'3px solid '+(i===ae?C.navyDark:'transparent'),background:'transparent',color:i===ae?C.navyDark:C.textDim,fontSize:13,fontWeight:i===ae?700:400,cursor:'pointer',whiteSpace:'nowrap',display:'flex',alignItems:'center',gap:6,fontFamily:'Barlow Condensed',minHeight:44}}>
                 {e.name.toUpperCase()}
                 {ep.length>0&&<span style={{fontSize:10,color:i===ae?C.navyMid:C.textMuted,background:i===ae?C.blueDim:'#f3f4f6',padding:'1px 6px',borderRadius:8,fontFamily:'DM Mono'}}>{ed}/{ep.length}</span>}
@@ -1478,7 +1527,7 @@ function App(){
 
         <div style={{background:C.navyDark,borderTop:'1px solid #1e3a5f',display:'flex',alignItems:'stretch',flexShrink:0,height:58,paddingBottom:'env(safe-area-inset-bottom)'}}>
           {modes.map(m=>{const active=mode===m.id;const danger=m.danger;const col=active?(danger?'#fca5a5':'#93c5fd'):(danger?'#64748b':'#94a3b8');return(
-            <button key={m.id} onClick={()=>{setMode(m.id);if(m.id!=='move-pin')setMovId(null);}}
+            <button key={m.id} onClick={()=>{setMode(m.id);setDupFromId(null);if(m.id!=='move-pin')setMovId(null);}}
               style={{flex:1,background:active?(danger?'rgba(220,38,38,0.15)':'rgba(37,99,235,0.18)'):'transparent',border:'none',borderTop:'2px solid '+(active?(danger?'#dc2626':C.blue):'transparent'),color:col,cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:2,fontFamily:'Barlow Condensed',padding:'4px 2px'}}>
               <span style={{fontSize:18,lineHeight:1}}>{m.i}</span>
               <span style={{fontSize:9,fontWeight:700,letterSpacing:0.5}}>{m.l.split(' ')[0].toUpperCase()}</span>
@@ -1567,7 +1616,7 @@ function App(){
           </div>
         )}
 
-        {modal&&<PinModal pin={modal} repairList={rl} onSave={savePin} onTrash={trashPin} onClose={()=>{setModal(null);setSelPin(null);}} onAddRT={addRT} isMobile={isMobile} user={user}/>}
+        {modal&&<PinModal pin={modal} repairList={rl} onSave={savePin} onTrash={trashPin} onDuplicate={duplicatePin} onClose={()=>{setModal(null);setSelPin(null);}} onAddRT={addRT} isMobile={isMobile} user={user}/>}
         {showT&&<SummaryTable project={project} onClose={()=>setShowT(false)} user={user}/>}
         {showTrash&&<TrashPanel project={project} onRestore={restorePin} onClose={()=>setShowTrash(false)}/>}
         {showReview&&<SurveyReview project={project} user={user} onApprove={approvePin} onDecline={declinePin} onClose={()=>setShowReview(false)}/>}
@@ -1600,7 +1649,7 @@ function App(){
           <div style={{fontSize:9,color:C.textMuted,letterSpacing:1.5,marginBottom:6,fontFamily:'Barlow Condensed',fontWeight:700}}>MODE</div>
           <div style={{display:'flex',flexDirection:'column',gap:4}}>
             {modes.map(m=>{const active=mode===m.id;const danger=m.danger;return(
-              <button key={m.id} onClick={()=>{setMode(m.id);if(m.id!=='move-pin')setMovId(null);}}
+              <button key={m.id} onClick={()=>{setMode(m.id);setDupFromId(null);if(m.id!=='move-pin')setMovId(null);}}
                 style={{padding:'6px 10px',borderRadius:6,border:'1px solid '+(active?(danger?'#dc2626':C.blue):C.border),background:active?(danger?'#dc262614':C.blueDim):C.card,color:active?(danger?'#dc2626':C.blue):(danger?'#9ca3af':C.textDim),fontSize:12,fontWeight:active?700:400,cursor:'pointer',textAlign:'left',fontFamily:'Barlow Condensed'}}>
                 {m.i} {m.l}
               </button>
@@ -1644,7 +1693,7 @@ function App(){
           {project.elevations.map((e,i)=>{
             const ep=e.pins||[];const ed=ep.filter(p=>p.status===ST.DONE).length;
             return(
-              <button key={i} onClick={()=>{setAe(i);setMode('pan');setMovId(null);setSelPin(null);setZoom(1);setPan({x:0,y:0});}}
+              <button key={i} onClick={()=>{setAe(i);setMode("pan");setMovId(null);setDupFromId(null);setSelPin(null);setZoom(1);setPan({x:0,y:0});}}
                 style={{padding:'10px 16px',border:'none',borderBottom:'2px solid '+(i===ae?C.navyDark:'transparent'),background:'transparent',color:i===ae?C.navyDark:C.textDim,fontSize:12,fontWeight:i===ae?700:400,cursor:'pointer',whiteSpace:'nowrap',display:'flex',alignItems:'center',gap:6,fontFamily:'Barlow Condensed',transition:'all 0.1s'}}>
                 {e.name.toUpperCase()}
                 {ep.length>0&&<span style={{fontSize:9,color:i===ae?C.navyMid:C.textMuted,background:i===ae?C.blueDim:'#f3f4f6',padding:'1px 6px',borderRadius:8,fontFamily:'DM Mono'}}>{ed}/{ep.length}</span>}
@@ -1719,7 +1768,7 @@ function App(){
         </div>
       )}
 
-      {modal&&<PinModal pin={modal} repairList={rl} onSave={savePin} onTrash={trashPin} onClose={()=>{setModal(null);setSelPin(null);}} onAddRT={addRT} isMobile={false} user={user}/>}
+      {modal&&<PinModal pin={modal} repairList={rl} onSave={savePin} onTrash={trashPin} onDuplicate={duplicatePin} onClose={()=>{setModal(null);setSelPin(null);}} onAddRT={addRT} isMobile={false} user={user}/>}
       {showT&&<SummaryTable project={project} onClose={()=>setShowT(false)} user={user}/>}
       {showTrash&&<TrashPanel project={project} onRestore={restorePin} onClose={()=>setShowTrash(false)}/>}
       {showReview&&<SurveyReview project={project} user={user} onApprove={approvePin} onDecline={declinePin} onClose={()=>setShowReview(false)}/>}
